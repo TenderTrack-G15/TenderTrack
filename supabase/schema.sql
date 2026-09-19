@@ -8,7 +8,11 @@
 -- security. The Android app never sends a role and cannot choose one.
 -- ===========================================================================
 
-create extension if not exists "pgcrypto";
+-- FIX: Supabase keeps extensions in a dedicated "extensions" schema, not public.
+-- Creating it here means this script works on a clean Supabase project AND on a
+-- plain Postgres/local setup.
+create schema if not exists extensions;
+create extension if not exists "pgcrypto" with schema extensions;
 
 -- ---------------------------------------------------------------------------
 -- Enumerated types — the single source of truth for every vocabulary
@@ -28,6 +32,11 @@ create type supplier_status as enum ('awaiting_verification', 'verified', 'not_a
 create type flag_severity as enum ('high', 'medium', 'low');
 create type flag_status as enum ('open', 'under_investigation', 'resolved');
 create type flag_outcome as enum ('cleared', 'corrective_action', 'escalated');
+-- Deliverable lifecycle, separate again from tender and supplier vocabularies.
+create type deliverable_status as enum (
+  'not_started', 'awaiting_verification', 'verified', 'overdue'
+);
+
 create type notification_kind as enum ('flag', 'deadline', 'award_code', 'registration', 'payment');
 
 -- ---------------------------------------------------------------------------
@@ -165,8 +174,34 @@ create table payments (
   paid_on          date not null,
   invoice_number   text not null,
   recorded_by      text not null default '',
-  created_at       timestamptz not null default now()
+  created_at       timestamptz not null default now(),
+
+  -- The same invoice must not be captured twice against the same tender.
+  -- Double-capture of an invoice is a real disbursement fraud vector, and
+  -- without this the seed script is not safe to re-run either.
+  constraint payment_invoice_unique unique (tender_id, invoice_number)
 );
+
+-- Contract deliverables / milestones.
+-- Deliverable 3 ERD calls this ContractMilestone. FR5 links uploaded evidence
+-- to a milestone and FR12 blocks payment until that evidence is reviewed, so
+-- neither requirement can be enforced without this table.
+create table deliverables (
+  id             uuid primary key default gen_random_uuid(),
+  tender_id      uuid not null references tenders(id) on delete cascade,
+  phase_name     text not null,
+  target_date    date not null,
+  phase_value    numeric(14,2) not null check (phase_value >= 0),
+  status         deliverable_status not null default 'not_started',
+  evidence_url   text,
+  evidence_at    timestamptz,
+  verified_by    uuid references auth.users,
+  verified_at    timestamptz,
+  created_at     timestamptz not null default now(),
+  unique (tender_id, phase_name)
+);
+
+create index deliverables_tender_idx on deliverables (tender_id);
 
 create table department_budgets (
   id             uuid primary key default gen_random_uuid(),
@@ -267,12 +302,20 @@ begin
 end;
 $$;
 
+-- Sequence used for human-readable flag references. Declared BEFORE the
+-- function that consumes it.
+create sequence if not exists flag_seq start 100;
+
 -- FR4: awarding issues the single-use 10-character code. The plain code is
 -- queued for email and SMS delivery; only its hash is stored, and the function
 -- returns nothing, so the officer's device never sees it.
 create or replace function award_tender(
   p_tender_id uuid, p_supplier_id uuid, p_awarded_value numeric, p_awarded_at timestamptz
-) returns void language plpgsql security definer set search_path = public as $$
+) returns void language plpgsql security definer
+  -- FIX: "extensions" MUST be on the path or gen_random_bytes/crypt/gen_salt
+  -- raise 42883 at runtime. A schema on search_path that does not exist is
+  -- ignored, so this is safe on any layout.
+  set search_path = public, extensions as $$
 declare
   v_code text;
   v_supplier suppliers%rowtype;
@@ -333,7 +376,14 @@ begin
 end;
 $$;
 
-create sequence if not exists flag_seq start 100;
+-- South African financial year for a date: 1 April 2026 -> '2026/27'.
+create or replace function sa_financial_year(p_on date)
+returns text language sql immutable as $$
+  select case when extract(month from p_on) >= 4
+    then extract(year from p_on)::int || '/' || right((extract(year from p_on)::int + 1)::text, 2)
+    else (extract(year from p_on)::int - 1) || '/' || right(extract(year from p_on)::text, 2)
+  end;
+$$;
 
 -- FR10 / FR12: record a payment and keep paid_to_date in step.
 create or replace function record_payment(
@@ -355,6 +405,23 @@ begin
     raise exception 'Payment would exceed the awarded value of R%', v_tender.awarded_value;
   end if;
 
+  -- FR12: a payment may not be released until the milestone documentation has
+  -- been submitted AND verified by an officer. Enforced only where the tender
+  -- actually has deliverables captured, so tenders recorded before the supplier
+  -- upload flow exists are not blocked.
+  if exists (select 1 from deliverables d where d.tender_id = p_tender_id) then
+    if not exists (
+      select 1 from deliverables d
+      where d.tender_id = p_tender_id
+        and d.phase_name = p_milestone
+        and d.status = 'verified'
+    ) then
+      raise exception
+        'FR12: milestone "%" has no verified documentation, so no payment can be released against it',
+        p_milestone;
+    end if;
+  end if;
+
   select full_name into v_actor from profiles where id = auth.uid();
 
   insert into payments (tender_id, tender_reference, milestone, amount, paid_on, invoice_number, recorded_by)
@@ -362,8 +429,12 @@ begin
 
   update tenders set paid_to_date = paid_to_date + p_amount where id = p_tender_id;
 
+  -- FIX: the financial year was hard-coded, so every payment recorded from
+  -- 1 April 2027 onwards would silently update nothing. SA financial years run
+  -- 1 April to 31 March, so derive it from the payment date.
   update department_budgets set disbursed = disbursed + p_amount
-  where department = v_tender.department and financial_year = '2026/27';
+  where department = v_tender.department
+    and financial_year = sa_financial_year(p_paid_on);
 
   insert into audit_trail (entity_type, entity_id, action, detail, actor)
   values ('tender', p_tender_id, 'Payment recorded',
@@ -382,6 +453,7 @@ alter table suppliers          enable row level security;
 alter table tenders            enable row level security;
 alter table award_codes        enable row level security;
 alter table payments           enable row level security;
+alter table deliverables       enable row level security;
 alter table department_budgets enable row level security;
 alter table compliance_flags   enable row level security;
 alter table flag_notes         enable row level security;
@@ -394,9 +466,13 @@ create policy profiles_read_self on profiles
 
 -- A user may edit their own profile but NOT their own role. This is the policy
 -- that makes role self-selection impossible.
+-- FIX: the original WITH CHECK sub-queried profiles from inside a policy ON
+-- profiles, which Postgres rejects at runtime with
+-- "infinite recursion detected in policy for relation profiles".
+-- auth_role() is SECURITY DEFINER so it bypasses RLS and breaks the cycle.
 create policy profiles_update_self on profiles
-  for update using (id = auth.uid())
-  with check (id = auth.uid() and role = (select role from profiles where id = auth.uid()));
+  for update to authenticated using (id = auth.uid())
+  with check (id = auth.uid() and role = auth_role());
 
 create policy profiles_admin_manage on profiles
   for all using (auth_role() = 'administrator') with check (auth_role() = 'administrator');
@@ -432,13 +508,59 @@ create policy award_codes_supplier_read on award_codes
   for select to authenticated
   using (exists (select 1 from suppliers s where s.id = award_codes.supplier_id and s.owner_id = auth.uid()));
 
+-- Deliverables --------------------------------------------------------------
+-- Delivery progress is public (FR14); only officers may change it, and only a
+-- supplier may attach evidence to its own contract.
+create policy deliverables_read on deliverables for select to anon, authenticated using (true);
+create policy deliverables_officer_write on deliverables for insert to authenticated
+  with check (is_officer());
+create policy deliverables_officer_update on deliverables for update to authenticated
+  using (
+    is_officer()
+    or exists (
+      select 1 from tenders t join suppliers s on s.id = t.awarded_supplier_id
+      where t.id = deliverables.tender_id and s.owner_id = auth.uid()
+    )
+  )
+  with check (
+    is_officer()
+    or exists (
+      select 1 from tenders t join suppliers s on s.id = t.awarded_supplier_id
+      where t.id = deliverables.tender_id and s.owner_id = auth.uid()
+    )
+  );
+
+-- Award codes (claiming) ----------------------------------------------------
+-- FIX: the original had no UPDATE policy, so FR4 "claim your awarded tender"
+-- could never be completed by the supplier it was issued to.
+create policy award_codes_supplier_claim on award_codes
+  for update to authenticated
+  using (exists (select 1 from suppliers s where s.id = award_codes.supplier_id and s.owner_id = auth.uid()))
+  with check (exists (select 1 from suppliers s where s.id = award_codes.supplier_id and s.owner_id = auth.uid()));
+
 -- Payments ------------------------------------------------------------------
-create policy payments_read on payments
-  for select to anon, authenticated using (true);   -- public fund transparency (FR11)
+-- FIX (POPIA): the original policy exposed invoice_number and recorded_by (a
+-- named official) to anonymous users. FR11 only requires the public to see how
+-- much has been disbursed, not who processed it or against which invoice.
+-- Signed-in oversight/officer roles still read the full row; the public reads
+-- the redacted view "payments_public" declared below.
+create policy payments_read_internal on payments
+  for select to authenticated
+  using (is_officer() or is_oversight() or auth_role() = 'finance_officer');
 
 create policy payments_write on payments
   for insert to authenticated
   with check (auth_role() in ('procurement_officer', 'finance_officer', 'administrator'));
+
+-- Public-facing, personal-data-free projection of the same rows (FR11, FR14).
+-- security_invoker = off means the view reads with the definer's rights, so the
+-- restrictive policy above does not block it.
+create view payments_public
+  with (security_invoker = off) as
+  select id, tender_id, tender_reference, milestone, amount, paid_on
+  from payments;
+
+grant select on payments_public to anon, authenticated;
 
 -- Budgets -------------------------------------------------------------------
 create policy budgets_read on department_budgets for select to anon, authenticated using (true);
@@ -448,7 +570,12 @@ create policy budgets_write on department_budgets for update to authenticated
 
 -- Flags ---------------------------------------------------------------------
 create policy flags_read on compliance_flags for select to anon, authenticated using (true);
-create policy flags_write on compliance_flags for all to authenticated
+-- FIX: the original used "for all", which includes DELETE. FR3 requires that
+-- no record can be removed without trace, so a flag may be raised and updated
+-- (resolved, escalated) but never deleted through the API.
+create policy flags_insert on compliance_flags for insert to authenticated
+  with check (is_officer() or is_oversight());
+create policy flags_update on compliance_flags for update to authenticated
   using (is_officer() or is_oversight()) with check (is_officer() or is_oversight());
 
 create policy flag_notes_read on flag_notes for select to authenticated
