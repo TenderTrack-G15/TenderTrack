@@ -10,7 +10,7 @@ plugins {
 // Read the Supabase credentials out of gradle.properties so they never end up
 // hard-coded in a source file that gets committed.
 val localProps = Properties().apply {
-    val f = rootProject.file("gradle.properties")
+    val f = rootProject.file("local.properties")   // <-- was gradle.properties
     if (f.exists()) f.inputStream().use { load(it) }
 }
 fun prop(name: String): String = (localProps.getProperty(name) ?: "").trim()
