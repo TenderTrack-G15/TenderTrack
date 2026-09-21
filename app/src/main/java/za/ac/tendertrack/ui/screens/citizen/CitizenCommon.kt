@@ -58,7 +58,6 @@ enum class BudgetBand(val label: String) {
     OVER_20M("Over R 20 m");
 
     fun matches(tender: Tender): Boolean {
-        if (this == ANY) return true
         val value = tender.awardedValue ?: return false
         return when (this) {
             ANY -> true
