@@ -12,6 +12,86 @@ import kotlinx.serialization.Serializable
  */
 
 // ---------------------------------------------------------------------------
+// When the department's estimate becomes public (design option 2)
+// ---------------------------------------------------------------------------
+
+/**
+ * The department's estimated budget is withheld while a tender is open for
+ * bids or under evaluation, so bids reflect real cost rather than clustering
+ * just under the budget. From award onwards it is published next to the
+ * awarded value. The database enforces the same rule (tenders_public view).
+ */
+val Tender.estimateIsPublic: Boolean
+    get() = status == TenderStatus.AWARDED ||
+        status == TenderStatus.IN_PROGRESS ||
+        status == TenderStatus.COMPLETED
+
+/**
+ * A copy safe to show the public: the estimate is zeroed while it is withheld,
+ * so no screen can display it by accident. Screens check [estimateIsPublic]
+ * before showing the figure at all.
+ */
+fun Tender.withEstimateWithheld(): Tender = if (estimateIsPublic) this else copy(estimatedBudget = 0.0)
+
+/**
+ * How far the award landed from the department's estimate, as a fraction:
+ * -0.02 means 2% below, 0.15 means 15% above. Null when there is no award yet.
+ */
+val Tender.awardVsEstimate: Double?
+    get() {
+        val awarded = awardedValue ?: return null
+        if (!estimateIsPublic || estimatedBudget <= 0.0) return null
+        return (awarded - estimatedBudget) / estimatedBudget
+    }
+
+/**
+ * One row of the tenders_public view. Identical to [Tender] except that
+ * estimated_budget is NULL until award, which the officer's Tender model
+ * (a non-null Double) cannot hold.
+ */
+@Serializable
+data class PublicTenderRow(
+    val id: String,
+    @SerialName("reference_number") val referenceNumber: String,
+    val title: String,
+    val description: String = "",
+    val department: String,
+    val category: String,
+    @SerialName("estimated_budget") val estimatedBudget: Double? = null,
+    @SerialName("closing_date") val closingDate: String,
+    @SerialName("contract_period_months") val contractPeriodMonths: Int = 12,
+    val status: TenderStatus,
+    @SerialName("awarded_supplier_id") val awardedSupplierId: String? = null,
+    @SerialName("awarded_supplier_name") val awardedSupplierName: String? = null,
+    @SerialName("awarded_value") val awardedValue: Double? = null,
+    @SerialName("awarded_at") val awardedAt: String? = null,
+    @SerialName("paid_to_date") val paidToDate: Double = 0.0,
+    @SerialName("open_flag_count") val openFlagCount: Int = 0,
+    @SerialName("created_at") val createdAt: String? = null
+) {
+    /** Converts to the app's normal [Tender]; a withheld estimate becomes 0. */
+    fun toTender(): Tender = Tender(
+        id = id,
+        referenceNumber = referenceNumber,
+        title = title,
+        description = description,
+        department = department,
+        category = category,
+        estimatedBudget = estimatedBudget ?: 0.0,
+        closingDate = closingDate,
+        contractPeriodMonths = contractPeriodMonths,
+        status = status,
+        awardedSupplierId = awardedSupplierId,
+        awardedSupplierName = awardedSupplierName,
+        awardedValue = awardedValue,
+        awardedAt = awardedAt,
+        paidToDate = paidToDate,
+        openFlagCount = openFlagCount,
+        createdAt = createdAt
+    )
+}
+
+// ---------------------------------------------------------------------------
 // Delivery phases (FR14: "overall deliverable completion")
 // ---------------------------------------------------------------------------
 
@@ -206,6 +286,7 @@ data class PublicDashboard(
 data class DepartmentSpend(
     val department: String,
     val tenders: Int,
+    /** Sum of estimates that are public — i.e. of awarded tenders only. */
     val estimatedBudget: Double,
     val awarded: Double,
     val paid: Double

@@ -43,18 +43,28 @@ fun ReportStatus.tone(): BadgeTone = when (this) {
 // Search filters (FR13: department, status, budget range and date)
 // ---------------------------------------------------------------------------
 
-/** Budget range filter. Bands chosen to split the sample tenders sensibly. */
+/**
+ * Value range filter (FR13 "budget range").
+ *
+ * Filters on the AWARDED value, never on the department's estimate. Filtering
+ * open tenders by a hidden estimate would reveal it: choosing "Over R 20 m"
+ * would tell a bidder which open tenders have large budgets. A tender that has
+ * not been awarded yet has no public value, so it only matches "Any value".
+ */
 enum class BudgetBand(val label: String) {
-    ANY("Any budget"),
+    ANY("Any value"),
     UNDER_5M("Under R 5 m"),
     FROM_5M_TO_20M("R 5 m – R 20 m"),
     OVER_20M("Over R 20 m");
 
-    fun matches(budget: Double): Boolean = when (this) {
-        ANY -> true
-        UNDER_5M -> budget < 5_000_000
-        FROM_5M_TO_20M -> budget >= 5_000_000 && budget <= 20_000_000
-        OVER_20M -> budget > 20_000_000
+    fun matches(tender: Tender): Boolean {
+        val value = tender.awardedValue ?: return false
+        return when (this) {
+            ANY -> true
+            UNDER_5M -> value < 5_000_000
+            FROM_5M_TO_20M -> value >= 5_000_000 && value <= 20_000_000
+            OVER_20M -> value > 20_000_000
+        }
     }
 }
 

@@ -138,7 +138,10 @@ private fun DetailBody(detail: PublicTenderDetail, onFlag: () -> Unit) {
         Spacer(Modifier.height(10.dp))
         KeyValueRow("Department", tender.department)
         KeyValueRow("Category", tender.category)
-        KeyValueRow("Estimated budget", Format.money(tender.estimatedBudget))
+        if (!tender.estimateIsPublic) {
+            // Design option 2: withheld while bidding and evaluation are under way.
+            KeyValueRow("Department's estimate", "Published after award", valueColor = AppColor.Muted)
+        }
         KeyValueRow("Contract period", "${tender.contractPeriodMonths} months")
         KeyValueRow(
             key = if (tender.status == TenderStatus.PUBLISHED) "Closing date" else "Closed",
@@ -161,7 +164,17 @@ private fun DetailBody(detail: PublicTenderDetail, onFlag: () -> Unit) {
             Spacer(Modifier.height(10.dp))
             KeyValueRow("Awarded to", tender.awardedSupplierName ?: "—")
             KeyValueRow("Awarded on", Format.date(tender.awardedAt))
+            KeyValueRow("Department's estimate", Format.money(tender.estimatedBudget))
             KeyValueRow("Awarded value", Format.money(awardedValue))
+            tender.awardVsEstimate?.let { variance ->
+                KeyValueRow(
+                    "Award vs estimate",
+                    varianceLabel(variance),
+                    // More than 10% over the estimate is the same threshold the
+                    // officer's "Award value variance" compliance rule uses.
+                    valueColor = if (variance > 0.10) AppColor.DangerInk else AppColor.Ink
+                )
+            }
             KeyValueRow("Paid to date", Format.money(tender.paidToDate))
             KeyValueRow("Still to be paid", Format.money(tender.remainingValue), showDivider = false)
             Spacer(Modifier.height(10.dp))
@@ -172,6 +185,14 @@ private fun DetailBody(detail: PublicTenderDetail, onFlag: () -> Unit) {
             Spacer(Modifier.height(Dimens.SpaceXs))
             Text("${Format.percent(tender.utilisation)} of the awarded value paid", style = AppType.Meta)
         }
+    }
+
+    if (!tender.estimateIsPublic) {
+        Text(
+            "The department's estimate is published once the tender is awarded, so bids " +
+                "reflect real cost rather than the budget. You can then compare it with the award.",
+            style = AppType.Meta
+        )
     }
 
     // -- Lifecycle timeline (FR2 made public) --------------------------------
@@ -226,6 +247,16 @@ private fun DetailBody(detail: PublicTenderDetail, onFlag: () -> Unit) {
         textAlign = TextAlign.Center,
         modifier = Modifier.fillMaxWidth()
     )
+}
+
+/** "4% below the estimate", "12% above the estimate" or "Matches the estimate". */
+private fun varianceLabel(variance: Double): String {
+    val percent = Format.percent(kotlin.math.abs(variance).toFloat())
+    return when {
+        kotlin.math.abs(variance) < 0.005 -> "Matches the estimate"
+        variance < 0 -> "$percent below the estimate"
+        else -> "$percent above the estimate"
+    }
 }
 
 /** One delivery phase: name and date on the left, status on the right. */

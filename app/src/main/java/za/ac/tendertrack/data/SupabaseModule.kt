@@ -54,6 +54,8 @@ object SupabaseModule {
 
         // Public / citizen screens -------------------------------------------
         const val DELIVERABLES = "deliverables"
+        /** Published tenders with the estimate withheld until award — see public_budget.sql. */
+        const val TENDERS_PUBLIC = "tenders_public"
         /** Redacted view of payments: no invoice numbers, no officials' names. */
         const val PAYMENTS_PUBLIC = "payments_public"
     }
