@@ -23,7 +23,6 @@ import za.ac.tendertrack.data.model.Tender
 import za.ac.tendertrack.data.model.TenderStatus
 import za.ac.tendertrack.data.repo.PublicRepository
 import za.ac.tendertrack.ui.components.*
-import za.ac.tendertrack.ui.screens.TenderCard
 import za.ac.tendertrack.ui.theme.AppColor
 import za.ac.tendertrack.ui.theme.AppType
 import za.ac.tendertrack.ui.theme.Dimens
@@ -64,7 +63,7 @@ data class PublicTenderListUiState(
                 matchesQuery &&
                     (status == null || tender.status == status) &&
                     (department == ALL_DEPARTMENTS || tender.department == department) &&
-                    budget.matches(tender.estimatedBudget) &&
+                    budget.matches(tender) &&
                     dateWindow.matches(tender)
             }
         }
@@ -156,11 +155,12 @@ fun PublicTenderListScreen(
             onSelect = viewModel::onDepartment
         )
         AppDropdownField(
-            label = "Budget range",
+            label = "Contract value",
             selected = state.budget,
             options = BudgetBand.entries.toList(),
             optionLabel = { it.label },
-            onSelect = viewModel::onBudget
+            onSelect = viewModel::onBudget,
+            hint = "Values are published once a tender is awarded."
         )
         AppDropdownField(
             label = "Closing date",
@@ -195,8 +195,9 @@ fun PublicTenderListScreen(
                 } else {
                     Column(verticalArrangement = Arrangement.spacedBy(Dimens.ListGap)) {
                         visible.forEach { tender ->
-                            // Same card as the officer list, so both look identical.
-                            TenderCard(tender) { onOpenTender(tender.id) }
+                            // Public version of the officer's card: the estimate
+                            // is only shown once the tender is awarded.
+                            PublicTenderCard(tender, onClick = { onOpenTender(tender.id) })
                         }
                     }
                 }

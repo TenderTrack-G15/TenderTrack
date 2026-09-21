@@ -103,8 +103,9 @@ fun PublicSpendScreen(
                         onClick = onOpenTenders
                     )
                     Text(
-                        "Only published tenders are included. Payments are shown as amounts and dates; " +
-                            "invoice numbers and officials' names are not published.",
+                        "Only published tenders are included. Estimates are shown once a tender is " +
+                            "awarded. Payments are shown as amounts and dates; invoice numbers and " +
+                            "officials' names are not published.",
                         style = AppType.Tiny,
                         textAlign = TextAlign.Center,
                         modifier = Modifier.fillMaxWidth()
@@ -123,7 +124,8 @@ private fun DepartmentCard(spend: DepartmentSpend) {
             subtitle = "${spend.tenders} published tender${if (spend.tenders == 1) "" else "s"}"
         )
         Spacer(Modifier.height(10.dp))
-        KeyValueRow("Estimated budgets", Format.money(spend.estimatedBudget))
+        // Only awarded tenders' estimates are public (design option 2).
+        KeyValueRow("Estimates (awarded tenders)", Format.money(spend.estimatedBudget))
         KeyValueRow("Awarded", Format.money(spend.awarded))
         KeyValueRow("Paid to suppliers", Format.money(spend.paid), showDivider = false)
         if (spend.awarded > 0) {

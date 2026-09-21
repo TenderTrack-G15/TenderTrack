@@ -47,18 +47,20 @@ interface PublicRepository {
 class SupabasePublicRepository(private val client: SupabaseClient) : PublicRepository {
 
     override suspend fun tenders(): List<Tender> = withContext(Dispatchers.IO) {
-        client.from(SupabaseModule.Table.TENDERS)
+        // The tenders_public view, not the tenders table: it withholds the
+        // estimate until award and leaves out unpublished tenders.
+        client.from(SupabaseModule.Table.TENDERS_PUBLIC)
             .select { order("created_at", Order.DESCENDING) }
-            .decodeList<Tender>()
-            // RLS already hides unpublished tenders from anonymous users. This
-            // second filter covers a device that still holds an officer session.
+            .decodeList<PublicTenderRow>()
+            .map { it.toTender() }
             .filter { it.status != TenderStatus.REGISTERED }
     }
 
     override suspend fun tender(id: String): Tender? = withContext(Dispatchers.IO) {
-        client.from(SupabaseModule.Table.TENDERS)
+        client.from(SupabaseModule.Table.TENDERS_PUBLIC)
             .select { filter { eq("id", id) } }
-            .decodeSingleOrNull<Tender>()
+            .decodeSingleOrNull<PublicTenderRow>()
+            ?.toTender()
             ?.takeIf { it.status != TenderStatus.REGISTERED }
     }
 
@@ -157,8 +159,11 @@ class SamplePublicRepository : PublicRepository {
     private val reports = mutableMapOf<String, StoredReport>()
     private val random = SecureRandom()
 
+    /** Same rule as the tenders_public view: no unpublished tenders, no early estimates. */
     override suspend fun tenders(): List<Tender> =
-        SampleData.tenders.filter { it.status != TenderStatus.REGISTERED }
+        SampleData.tenders
+            .filter { it.status != TenderStatus.REGISTERED }
+            .map { it.withEstimateWithheld() }
 
     override suspend fun tender(id: String): Tender? = tenders().firstOrNull { it.id == id }
 
@@ -212,9 +217,13 @@ class SamplePublicRepository : PublicRepository {
                 raisedAutomatically = false
             )
         )
+        // Update the real sample record, not the public copy: the public copy
+        // has its estimate withheld, and saving it would wipe the estimate
+        // from the officer screens too.
         val index = SampleData.tenders.indexOfFirst { it.id == tender.id }
         if (index >= 0) {
-            SampleData.tenders[index] = tender.copy(openFlagCount = tender.openFlagCount + 1)
+            val original = SampleData.tenders[index]
+            SampleData.tenders[index] = original.copy(openFlagCount = original.openFlagCount + 1)
         }
         SampleData.notifications.add(
             0,
@@ -352,7 +361,8 @@ internal fun buildDepartmentSpend(tenders: List<Tender>): List<DepartmentSpend> 
             DepartmentSpend(
                 department = department,
                 tenders = list.size,
-                estimatedBudget = list.sumOf { it.estimatedBudget },
+                // Only estimates that are already public (design option 2).
+                estimatedBudget = list.filter { it.estimateIsPublic }.sumOf { it.estimatedBudget },
                 awarded = list.sumOf { it.awardedValue ?: 0.0 },
                 paid = list.sumOf { it.paidToDate }
             )
