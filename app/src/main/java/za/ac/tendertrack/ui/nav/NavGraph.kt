@@ -19,7 +19,8 @@ import za.ac.tendertrack.data.model.Profile
 import za.ac.tendertrack.ui.screens.*
 
 /**
- * The whole Procurement Officer flow.
+ * The whole app: the Procurement Officer flow, plus the Public / citizen flow
+ * (added with one call to citizenGraph, defined in CitizenNavGraph.kt).
  *
  * Sign in sits outside the drawer; everything after it is wrapped in the drawer
  * so the navigation is available from any top-level screen.
@@ -53,7 +54,8 @@ fun TenderTrackNavGraph(navController: NavHostController = rememberNavController
 
     ModalNavigationDrawer(
         drawerState = drawerState,
-        gesturesEnabled = currentRoute != Routes.SIGN_IN,
+        // Closed on Sign In and on every citizen screen: the public never sees the officer menu.
+        gesturesEnabled = currentRoute != Routes.SIGN_IN && !CitizenRoutes.isCitizenRoute(currentRoute),
         drawerContent = {
             AppDrawer(
                 profile = profile,
@@ -83,6 +85,10 @@ fun TenderTrackNavGraph(navController: NavHostController = rememberNavController
                         navController.navigate(Routes.DASHBOARD) {
                             popUpTo(Routes.SIGN_IN) { inclusive = true }
                         }
+                    },
+                    // Sign In stays underneath, so Back from the public dashboard returns here.
+                    onContinueAsPublic = {
+                        navController.navigate(CitizenRoutes.HOME) { launchSingleTop = true }
                     }
                 )
             }
@@ -251,6 +257,9 @@ fun TenderTrackNavGraph(navController: NavHostController = rememberNavController
                     onOpenTenders = { go(Routes.TENDERS) }
                 )
             }
+
+            // Public / citizen screens — see CitizenNavGraph.kt
+            citizenGraph(navController)
         }
     }
 }

@@ -51,6 +51,11 @@ object SupabaseModule {
         const val AUDIT = "audit_trail"
         const val NOTIFICATIONS = "notifications"
         const val BUDGETS = "department_budgets"
+
+        // Public / citizen screens -------------------------------------------
+        const val DELIVERABLES = "deliverables"
+        /** Redacted view of payments: no invoice numbers, no officials' names. */
+        const val PAYMENTS_PUBLIC = "payments_public"
     }
 
     /** Postgres functions called with rpc(). */
@@ -59,5 +64,11 @@ object SupabaseModule {
         const val AWARD_TENDER = "award_tender"
         const val ADVANCE_TENDER_STATUS = "advance_tender_status"
         const val RECORD_PAYMENT = "record_payment"
+
+        // Citizen reports — see supabase/public_access.sql -------------------
+        const val SUBMIT_CITIZEN_REPORT = "submit_citizen_report"
+        const val CITIZEN_REPORT_STATUS = "citizen_report_status"
+        const val ADD_CITIZEN_REPORT_INFORMATION = "add_citizen_report_information"
+        const val WITHDRAW_CITIZEN_REPORT = "withdraw_citizen_report"
     }
 }

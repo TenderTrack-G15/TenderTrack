@@ -40,6 +40,11 @@ object ServiceLocator {
         } ?: SampleTenderRepository()
     }
 
+    /** Public / citizen screens. Runs as the anonymous role on Supabase. */
+    val publicRepository: PublicRepository by lazy {
+        SupabaseModule.client?.let { SupabasePublicRepository(it) } ?: SamplePublicRepository()
+    }
+
     val reportRepository: ReportRepository by lazy {
         ReportRepository(tenderRepository, supplierRepository, paymentRepository, flagRepository)
     }
