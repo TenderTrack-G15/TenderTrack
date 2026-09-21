@@ -107,6 +107,8 @@ class SignInViewModel(
 @Composable
 fun SignInScreen(
     onSignedIn: (Profile) -> Unit,
+    /** Guest entry to the public screens — no account needed (Deliverable 3, 5.1). */
+    onContinueAsPublic: () -> Unit,
     viewModel: SignInViewModel = viewModel()
 ) {
     val state by viewModel.state.collectAsState()
@@ -194,9 +196,19 @@ fun SignInScreen(
             )
         }
 
+        // -- Public / citizen entry (FR13-FR15: no login required) --------------
         Spacer(Modifier.height(Dimens.SpaceXxl))
+        Text("Not a government official?", style = AppType.Meta, textAlign = TextAlign.Center)
+        Spacer(Modifier.height(Dimens.SpaceMd))
+        SecondaryButton(
+            text = "Continue as a member of the public",
+            icon = Icons.Default.Public,
+            onClick = onContinueAsPublic
+        )
+        Spacer(Modifier.height(Dimens.SpaceSm))
         Text(
-            "Suppliers and members of the public use the TenderTrack public app.",
+            "View published tenders, spending and delivery progress, or flag a tender for review. " +
+                "No account needed.",
             style = AppType.Tiny,
             textAlign = TextAlign.Center
         )
