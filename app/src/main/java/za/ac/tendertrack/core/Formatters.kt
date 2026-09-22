@@ -12,7 +12,6 @@ import kotlin.math.roundToLong
  * the same on every screen.
  */
 object Format {
-
     private val months = listOf(
         "Jan", "Feb", "Mar", "Apr", "May", "Jun",
         "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"

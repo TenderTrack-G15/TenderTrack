@@ -20,7 +20,8 @@ import za.ac.tendertrack.ui.screens.*
 
 /**
  * The whole app: the Procurement Officer flow, plus the Public / citizen flow
- * (added with one call to citizenGraph, defined in CitizenNavGraph.kt).
+ * (added with one call to citizenGraph, defined in CitizenNavGraph.kt), and the
+ * Administrator flow (one call to adminGraph, defined in AdminNavGraph.kt).
  *
  * Sign in sits outside the drawer; everything after it is wrapped in the drawer
  * so the navigation is available from any top-level screen.
@@ -55,7 +56,9 @@ fun TenderTrackNavGraph(navController: NavHostController = rememberNavController
     ModalNavigationDrawer(
         drawerState = drawerState,
         // Closed on Sign In and on every citizen screen: the public never sees the officer menu.
-        gesturesEnabled = currentRoute != Routes.SIGN_IN && !CitizenRoutes.isCitizenRoute(currentRoute),
+        gesturesEnabled = currentRoute != Routes.SIGN_IN &&
+            !CitizenRoutes.isCitizenRoute(currentRoute) &&
+            !AdminRoutes.isAdminRoute(currentRoute),
         drawerContent = {
             AppDrawer(
                 profile = profile,
@@ -81,9 +84,17 @@ fun TenderTrackNavGraph(navController: NavHostController = rememberNavController
                 SignInScreen(
                     onSignedIn = { signedInProfile ->
                         profile = signedInProfile
-                        dashboardViewModel.load()
-                        navController.navigate(Routes.DASHBOARD) {
-                            popUpTo(Routes.SIGN_IN) { inclusive = true }
+                        // Administrators get their own screens, with no tender actions
+                        // (Deliverable 3, section 5.7). Everyone else here is an officer.
+                        if (signedInProfile.role == za.ac.tendertrack.data.model.UserRole.ADMINISTRATOR) {
+                            navController.navigate(AdminRoutes.HOME) {
+                                popUpTo(Routes.SIGN_IN) { inclusive = true }
+                            }
+                        } else {
+                            dashboardViewModel.load()
+                            navController.navigate(Routes.DASHBOARD) {
+                                popUpTo(Routes.SIGN_IN) { inclusive = true }
+                            }
                         }
                     },
                     // Sign In stays underneath, so Back from the public dashboard returns here.
@@ -260,6 +271,21 @@ fun TenderTrackNavGraph(navController: NavHostController = rememberNavController
 
             // Public / citizen screens — see CitizenNavGraph.kt
             citizenGraph(navController)
+
+            // Administrator screens — see AdminNavGraph.kt
+            adminGraph(
+                navController = navController,
+                currentProfile = { profile },
+                onSignOut = {
+                    scope.launch {
+                        ServiceLocator.authRepository.signOut()
+                        profile = null
+                        navController.navigate(Routes.SIGN_IN) {
+                            popUpTo(0) { inclusive = true }
+                        }
+                    }
+                }
+            )
         }
     }
 }
