@@ -46,10 +46,10 @@ fun ReportStatus.tone(): BadgeTone = when (this) {
 /**
  * Value range filter (FR13 "budget range").
  *
- * Filters on the AWARDED value, never on the department's estimate. Filtering
- * open tenders by a hidden estimate would reveal it: choosing "Over R 20 m"
- * would tell a bidder which open tenders have large budgets. A tender that has
- * not been awarded yet has no public value, so it only matches "Any value".
+ * Filters on the AWARDED contract value, which is public, not on the
+ * department's estimate, which is hidden until award. Filtering on the hidden
+ * estimate would let anyone narrow it down by trying each range. Tenders that
+ * have not been awarded yet have no value to filter on, so a range excludes them.
  */
 enum class BudgetBand(val label: String) {
     ANY("Any value"),
@@ -58,6 +58,7 @@ enum class BudgetBand(val label: String) {
     OVER_20M("Over R 20 m");
 
     fun matches(tender: Tender): Boolean {
+        if (this == ANY) return true
         val value = tender.awardedValue ?: return false
         return when (this) {
             ANY -> true

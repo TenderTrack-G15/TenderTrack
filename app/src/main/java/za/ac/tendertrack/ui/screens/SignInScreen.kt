@@ -49,7 +49,8 @@ data class SignInUiState(
 )
 
 class SignInViewModel(
-    private val authRepository: za.ac.tendertrack.data.repo.AuthRepository = ServiceLocator.authRepository
+    private val authRepository: za.ac.tendertrack.data.repo.AuthRepository = ServiceLocator.authRepository,
+    private val adminRepository: za.ac.tendertrack.data.repo.AdminRepository = ServiceLocator.adminRepository
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(SignInUiState())
@@ -79,14 +80,37 @@ class SignInViewModel(
         viewModelScope.launch {
             try {
                 val profile = authRepository.signIn(current.email, current.password)
+
+                // A suspended account can still log in to Supabase but has no access
+                // (admin_access.sql). Say so, rather than showing an empty app. If the
+                // check itself fails (e.g. the migration is not run yet), carry on:
+                // the database still blocks a suspended user's data either way.
+                val suspended = try {
+                    adminRepository.isCurrentAccountSuspended()
+                } catch (e: Exception) {
+                    false
+                }
+                if (suspended) {
+                    authRepository.signOut()
+                    _state.update {
+                        it.copy(
+                            submitting = false,
+                            formError = "This account has been suspended. Contact your administrator."
+                        )
+                    }
+                    return@launch
+                }
+
+                // Staff sign-in is for procurement officers and administrators;
+                // NavGraph sends each to their own screens.
                 if (!profile.canUseProcurementOfficerScreens()) {
                     authRepository.signOut()
                     _state.update {
                         it.copy(
                             submitting = false,
                             formError = "This account is registered as ${profile.role.displayName}. " +
-                                "These screens are for procurement officers. Contact your administrator " +
-                                "if your role is wrong."
+                                "Staff sign-in is for procurement officers and administrators. Contact " +
+                                "your administrator if your role is wrong."
                         )
                     }
                     return@launch
@@ -135,46 +159,77 @@ fun SignInScreen(
         Spacer(Modifier.height(14.dp))
         Text("TenderTrack", style = AppType.H1.copy(fontSize = 30.sp))
         Spacer(Modifier.height(6.dp))
-        Text("Sign in to continue", style = AppType.Meta)
-
-        Spacer(Modifier.height(34.dp))
-
-        AppTextField(
-            label = "Email address",
-            value = state.email,
-            onValueChange = viewModel::onEmailChange,
-            placeholder = "you@department.gov.za",
-            leadingIcon = Icons.Default.MailOutline,
-            keyboardType = KeyboardType.Email,
-            error = state.emailError
-        )
-        Spacer(Modifier.height(Dimens.SpaceLg))
-        AppTextField(
-            label = "Password",
-            value = state.password,
-            onValueChange = viewModel::onPasswordChange,
-            placeholder = "Enter your password",
-            leadingIcon = Icons.Default.Lock,
-            keyboardType = KeyboardType.Password,
-            isPassword = true,
-            error = state.passwordError
+        Text(
+            "IT tender lifecycle tracking for South African public procurement",
+            style = AppType.Meta,
+            textAlign = TextAlign.Center
         )
 
-        if (state.formError != null) {
+        // -- Public / citizen entry first: most people using TenderTrack are
+        //    members of the public (FR13-FR15, no login required) ----------------
+        Spacer(Modifier.height(30.dp))
+        PrimaryButton(
+            text = "Continue as a member of the public",
+            icon = Icons.Default.Public,
+            onClick = onContinueAsPublic
+        )
+        Spacer(Modifier.height(Dimens.SpaceSm))
+        Text(
+            "View published tenders, spending and delivery progress, or flag a tender for review. " +
+                "No account needed.",
+            style = AppType.Tiny,
+            textAlign = TextAlign.Center
+        )
+
+        // -- Staff sign-in below ------------------------------------------------------
+        Spacer(Modifier.height(Dimens.SpaceXxl))
+        AppCard {
+            CardHeader(
+                title = "Government staff",
+                subtitle = "Procurement officers and administrators sign in here"
+            )
             Spacer(Modifier.height(Dimens.SpaceLg))
-            NoteBanner(
-                text = state.formError!!,
-                tone = NoteTone.Danger,
-                icon = Icons.Default.Warning
+
+            AppTextField(
+                label = "Email address",
+                value = state.email,
+                onValueChange = viewModel::onEmailChange,
+                placeholder = "you@department.gov.za",
+                leadingIcon = Icons.Default.MailOutline,
+                keyboardType = KeyboardType.Email,
+                error = state.emailError
+            )
+            Spacer(Modifier.height(Dimens.SpaceLg))
+            AppTextField(
+                label = "Password",
+                value = state.password,
+                onValueChange = viewModel::onPasswordChange,
+                placeholder = "Enter your password",
+                leadingIcon = Icons.Default.Lock,
+                keyboardType = KeyboardType.Password,
+                isPassword = true,
+                error = state.passwordError
+            )
+
+            if (state.formError != null) {
+                Spacer(Modifier.height(Dimens.SpaceLg))
+                NoteBanner(
+                    text = state.formError!!,
+                    tone = NoteTone.Danger,
+                    icon = Icons.Default.Warning
+                )
+            }
+
+            Spacer(Modifier.height(Dimens.SpaceXl))
+            // A secondary button, so the public entry above stays the one primary
+            // action on the page. It still shows progress while signing in.
+            SecondaryButton(
+                text = if (state.submitting) "Signing in…" else "Sign in",
+                icon = Icons.Default.Lock,
+                enabled = !state.submitting,
+                onClick = { viewModel.signIn(onSignedIn) }
             )
         }
-
-        Spacer(Modifier.height(Dimens.SpaceXl))
-        PrimaryButton(
-            text = "Sign in",
-            loading = state.submitting,
-            onClick = { viewModel.signIn(onSignedIn) }
-        )
 
         Spacer(Modifier.height(Dimens.SpaceXl))
         NoteBanner(
@@ -190,27 +245,11 @@ fun SignInScreen(
             NoteBanner(
                 title = "Running on sample data",
                 text = "No Supabase project is configured, so the app is using the bundled demo data. " +
-                    "Sign in with any email address and a password of 8 characters or more.",
+                    "Sign in with any email address and a password of 8 characters or more. " +
+                    "An email starting with \"admin\" opens the Administrator screens.",
                 tone = NoteTone.Info,
                 icon = Icons.Default.Info
             )
         }
-
-        // -- Public / citizen entry (FR13-FR15: no login required) --------------
-        Spacer(Modifier.height(Dimens.SpaceXxl))
-        Text("Not a government official?", style = AppType.Meta, textAlign = TextAlign.Center)
-        Spacer(Modifier.height(Dimens.SpaceMd))
-        SecondaryButton(
-            text = "Continue as a member of the public",
-            icon = Icons.Default.Public,
-            onClick = onContinueAsPublic
-        )
-        Spacer(Modifier.height(Dimens.SpaceSm))
-        Text(
-            "View published tenders, spending and delivery progress, or flag a tender for review. " +
-                "No account needed.",
-            style = AppType.Tiny,
-            textAlign = TextAlign.Center
-        )
     }
 }

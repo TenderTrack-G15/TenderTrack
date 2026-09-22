@@ -45,6 +45,11 @@ object ServiceLocator {
         SupabaseModule.client?.let { SupabasePublicRepository(it) } ?: SamplePublicRepository()
     }
 
+    /** Administrator screens. Every change goes through an audited database function. */
+    val adminRepository: AdminRepository by lazy {
+        SupabaseModule.client?.let { SupabaseAdminRepository(it) } ?: SampleAdminRepository()
+    }
+
     val reportRepository: ReportRepository by lazy {
         ReportRepository(tenderRepository, supplierRepository, paymentRepository, flagRepository)
     }
