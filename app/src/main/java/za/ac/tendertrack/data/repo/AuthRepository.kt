@@ -49,23 +49,28 @@ class SupabaseAuthRepository(private val client: SupabaseClient) : AuthRepositor
     }
 }
 
-/** Offline stand-in. Accepts any password of a valid length. */
+/**
+ * Offline stand-in. Accepts any password of a valid length.
+ *
+ * An email starting with "admin" signs in as the sample administrator, so the
+ * Administrator screens can be demonstrated without Supabase. Any other email
+ * signs in as the sample procurement officer.
+ */
 class SampleAuthRepository : AuthRepository {
 
-    private var signedIn = false
+    private var current: Profile? = null
 
     override suspend fun signIn(email: String, password: String): Profile {
         if (password.length < 8) error("Invalid login credentials")
-        signedIn = true
-        return SampleData.currentUser.copy(email = email.trim())
+        val base = if (email.trim().lowercase().startsWith("admin")) SampleAdmin.profile else SampleData.currentUser
+        return base.copy(email = email.trim()).also { current = it }
     }
 
     override suspend fun signOut() {
-        signedIn = false
+        current = null
     }
 
-    override suspend fun currentProfile(): Profile? =
-        if (signedIn) SampleData.currentUser else null
+    override suspend fun currentProfile(): Profile? = current
 }
 
 /** True when the profile may use the Procurement Officer screens. */
