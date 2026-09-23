@@ -45,6 +45,11 @@ object ServiceLocator {
         SupabaseModule.client?.let { SupabasePublicRepository(it) } ?: SamplePublicRepository()
     }
 
+    /** A supplier's own registration: duplicate check, status, resubmission. */
+    val supplierAccountRepository: SupplierAccountRepository by lazy {
+        SupabaseModule.client?.let { SupabaseSupplierAccountRepository(it) } ?: SampleSupplierAccountRepository()
+    }
+
     /** Administrator screens. Every change goes through an audited database function. */
     val adminRepository: AdminRepository by lazy {
         SupabaseModule.client?.let { SupabaseAdminRepository(it) } ?: SampleAdminRepository()

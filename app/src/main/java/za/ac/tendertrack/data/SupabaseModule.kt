@@ -83,5 +83,9 @@ object SupabaseModule {
         const val ADMIN_SAVE_INVITATION = "admin_save_invitation"
         const val ADMIN_REVOKE_INVITATION = "admin_revoke_invitation"
         const val ACCOUNT_IS_SUSPENDED = "account_is_suspended"
+
+        // Supplier sign-up — see supabase/supplier_accounts.sql ----------------
+        const val SUPPLIER_REGISTRATION_PROBLEM = "supplier_registration_problem"
+        const val RESUBMIT_SUPPLIER_REGISTRATION = "resubmit_supplier_registration"
     }
 }

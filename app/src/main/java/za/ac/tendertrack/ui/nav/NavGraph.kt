@@ -55,10 +55,12 @@ fun TenderTrackNavGraph(navController: NavHostController = rememberNavController
 
     ModalNavigationDrawer(
         drawerState = drawerState,
-        // Closed on Sign In and on every citizen screen: the public never sees the officer menu.
+        // Open only on officer screens: never on Welcome, Sign In, the public,
+        // supplier or administrator screens.
         gesturesEnabled = currentRoute != Routes.SIGN_IN &&
             !CitizenRoutes.isCitizenRoute(currentRoute) &&
-            !AdminRoutes.isAdminRoute(currentRoute),
+            !AdminRoutes.isAdminRoute(currentRoute) &&
+            !AccountRoutes.isAccountRoute(currentRoute),
         drawerContent = {
             AppDrawer(
                 profile = profile,
@@ -70,7 +72,7 @@ fun TenderTrackNavGraph(navController: NavHostController = rememberNavController
                     scope.launch {
                         ServiceLocator.authRepository.signOut()
                         profile = null
-                        navController.navigate(Routes.SIGN_IN) {
+                        navController.navigate(AccountRoutes.WELCOME) {
                             popUpTo(0) { inclusive = true }
                         }
                     }
@@ -78,28 +80,53 @@ fun TenderTrackNavGraph(navController: NavHostController = rememberNavController
             )
         }
     ) {
-        NavHost(navController = navController, startDestination = Routes.SIGN_IN) {
+        // Each role's own home after signing in (or signing up as a supplier).
+        // Clears the back stack, so Back then leaves the app rather than
+        // returning to Sign In.
+        val openHomeFor: (Profile) -> Unit = { signedInProfile ->
+            profile = signedInProfile
+            val home = when (signedInProfile.role) {
+                za.ac.tendertrack.data.model.UserRole.ADMINISTRATOR -> AdminRoutes.HOME
+                za.ac.tendertrack.data.model.UserRole.SUPPLIER -> AccountRoutes.SUPPLIER_HOME
+                else -> {
+                    dashboardViewModel.load()
+                    Routes.DASHBOARD
+                }
+            }
+            navController.navigate(home) { popUpTo(0) { inclusive = true } }
+        }
+
+        // Sign out from the supplier and administrator screens.
+        val signOutToWelcome: () -> Unit = {
+            scope.launch {
+                ServiceLocator.authRepository.signOut()
+                profile = null
+                navController.navigate(AccountRoutes.WELCOME) { popUpTo(0) { inclusive = true } }
+            }
+        }
+
+        NavHost(navController = navController, startDestination = AccountRoutes.WELCOME) {
+
+            // Welcome, supplier sign-up, forgot password, supplier home — see AccountNavGraph.kt
+            accountGraph(
+                navController = navController,
+                currentProfile = { profile },
+                onSignedIn = openHomeFor,
+                onSignOut = signOutToWelcome
+            )
 
             composable(Routes.SIGN_IN) {
                 SignInScreen(
-                    onSignedIn = { signedInProfile ->
-                        profile = signedInProfile
-                        // Administrators get their own screens, with no tender actions
-                        // (Deliverable 3, section 5.7). Everyone else here is an officer.
-                        if (signedInProfile.role == za.ac.tendertrack.data.model.UserRole.ADMINISTRATOR) {
-                            navController.navigate(AdminRoutes.HOME) {
-                                popUpTo(Routes.SIGN_IN) { inclusive = true }
-                            }
-                        } else {
-                            dashboardViewModel.load()
-                            navController.navigate(Routes.DASHBOARD) {
-                                popUpTo(Routes.SIGN_IN) { inclusive = true }
-                            }
+                    audience = za.ac.tendertrack.ui.screens.SignInAudience.GOVERNMENT,
+                    onBack = { navController.popBackStack() },
+                    // Officers and administrators each get their own screens.
+                    onSignedIn = openHomeFor,
+                    onForgotPassword = { navController.navigate(AccountRoutes.FORGOT_PASSWORD) },
+                    onSwitchAudience = {
+                        navController.navigate(AccountRoutes.SUPPLIER_SIGN_IN) {
+                            popUpTo(Routes.SIGN_IN) { inclusive = true }
+                            launchSingleTop = true
                         }
-                    },
-                    // Sign In stays underneath, so Back from the public dashboard returns here.
-                    onContinueAsPublic = {
-                        navController.navigate(CitizenRoutes.HOME) { launchSingleTop = true }
                     }
                 )
             }
@@ -276,15 +303,7 @@ fun TenderTrackNavGraph(navController: NavHostController = rememberNavController
             adminGraph(
                 navController = navController,
                 currentProfile = { profile },
-                onSignOut = {
-                    scope.launch {
-                        ServiceLocator.authRepository.signOut()
-                        profile = null
-                        navController.navigate(Routes.SIGN_IN) {
-                            popUpTo(0) { inclusive = true }
-                        }
-                    }
-                }
+                onSignOut = signOutToWelcome
             )
         }
     }
