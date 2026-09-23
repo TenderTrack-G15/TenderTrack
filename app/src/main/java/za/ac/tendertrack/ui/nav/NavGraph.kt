@@ -60,7 +60,8 @@ fun TenderTrackNavGraph(navController: NavHostController = rememberNavController
         gesturesEnabled = currentRoute != Routes.SIGN_IN &&
             !CitizenRoutes.isCitizenRoute(currentRoute) &&
             !AdminRoutes.isAdminRoute(currentRoute) &&
-            !AccountRoutes.isAccountRoute(currentRoute),
+            !AccountRoutes.isAccountRoute(currentRoute) &&
+            !AuditorRoutes.isAuditorRoute(currentRoute),
         drawerContent = {
             AppDrawer(
                 profile = profile,
@@ -88,6 +89,7 @@ fun TenderTrackNavGraph(navController: NavHostController = rememberNavController
             val home = when (signedInProfile.role) {
                 za.ac.tendertrack.data.model.UserRole.ADMINISTRATOR -> AdminRoutes.HOME
                 za.ac.tendertrack.data.model.UserRole.SUPPLIER -> AccountRoutes.SUPPLIER_HOME
+                za.ac.tendertrack.data.model.UserRole.AUDITOR -> AuditorRoutes.HOME
                 else -> {
                     dashboardViewModel.load()
                     Routes.DASHBOARD
@@ -304,6 +306,18 @@ fun TenderTrackNavGraph(navController: NavHostController = rememberNavController
                 navController = navController,
                 currentProfile = { profile },
                 onSignOut = signOutToWelcome
+            )
+            // Auditor screens — see AuditorNavGraph.kt
+            auditorGraph(
+                navController = navController,
+                currentProfile = { profile },
+                onSignOut = {
+                    scope.launch {
+                        ServiceLocator.authRepository.signOut()
+                        profile = null
+                        navController.navigate(Routes.SIGN_IN) { popUpTo(0) { inclusive = true } }
+                    }
+                }
             )
         }
     }

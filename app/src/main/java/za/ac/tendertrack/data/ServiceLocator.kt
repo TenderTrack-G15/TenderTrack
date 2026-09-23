@@ -58,4 +58,9 @@ object ServiceLocator {
     val reportRepository: ReportRepository by lazy {
         ReportRepository(tenderRepository, supplierRepository, paymentRepository, flagRepository)
     }
+
+    /** Auditor screens: flags, findings and the read-only overview. */
+    val auditorRepository: AuditorRepository by lazy {
+        SupabaseModule.client?.let { SupabaseAuditorRepository(it) } ?: SampleAuditorRepository()
+    }
 }

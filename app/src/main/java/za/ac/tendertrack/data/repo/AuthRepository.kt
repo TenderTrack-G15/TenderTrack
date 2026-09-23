@@ -139,8 +139,12 @@ class SampleAuthRepository : AuthRepository {
 }
 
 /** Roles that have their own screens in this version of the app. */
-val SIGN_IN_ROLES = setOf(UserRole.PROCUREMENT_OFFICER, UserRole.ADMINISTRATOR, UserRole.SUPPLIER)
+val SIGN_IN_ROLES = setOf(
+    UserRole.PROCUREMENT_OFFICER, UserRole.ADMINISTRATOR, UserRole.AUDITOR, UserRole.SUPPLIER
+)
 
 /** True when the profile may use the Procurement Officer screens. */
 fun Profile.canUseProcurementOfficerScreens(): Boolean =
     role == UserRole.PROCUREMENT_OFFICER || role == UserRole.ADMINISTRATOR
+
+
