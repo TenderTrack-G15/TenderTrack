@@ -51,6 +51,12 @@ object SupabaseModule {
         const val AUDIT = "audit_trail"
         const val NOTIFICATIONS = "notifications"
         const val BUDGETS = "department_budgets"
+        const val BIDS = "bids"
+        const val EVALUATION_CRITERIA = "evaluation_criteria"
+        const val EVALUATION_SCORES = "evaluation_scores"
+        const val EVALUATION_RESULTS = "evaluation_results"
+        const val AWARD_APPROVALS = "award_approvals"
+        const val TENDER_CHANGES = "tender_changes"
 
         // Public / citizen screens -------------------------------------------
         /** Public view of tenders: estimate hidden until award (hide_estimates.sql). */
@@ -87,5 +93,6 @@ object SupabaseModule {
         // Supplier sign-up — see supabase/supplier_accounts.sql ----------------
         const val SUPPLIER_REGISTRATION_PROBLEM = "supplier_registration_problem"
         const val RESUBMIT_SUPPLIER_REGISTRATION = "resubmit_supplier_registration"
+
     }
 }
