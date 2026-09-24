@@ -67,6 +67,14 @@ object SupabaseModule {
 
         // Administrator screens — see supabase/admin_access.sql ----------------
         const val STAFF_INVITATIONS = "staff_invitations"
+
+        const val TENDER_BOARD = "tender_board"
+        const val TENDER_DETAILS = "tender_details"
+        const val TENDER_ELIGIBILITY = "tender_eligibility"
+        const val TENDER_DOCUMENTS = "tender_documents"
+        const val TENDER_UPDATES = "tender_updates"
+        const val SUPPLIER_DOCUMENTS = "supplier_documents"
+        const val SUPPLIER_BANKING = "supplier_banking"
     }
 
     /** Postgres functions called with rpc(). */
@@ -91,8 +99,11 @@ object SupabaseModule {
         const val ACCOUNT_IS_SUSPENDED = "account_is_suspended"
 
         // Supplier sign-up — see supabase/supplier_accounts.sql ----------------
-        const val SUPPLIER_REGISTRATION_PROBLEM = "supplier_registration_problem"
+        const val SAVE_SUPPLIER_PROFILE = "save_supplier_profile"
+        const val SAVE_SUPPLIER_BANKING = "save_supplier_banking"
+        const val SAVE_SUPPLIER_DOCUMENT = "save_supplier_document"
         const val RESUBMIT_SUPPLIER_REGISTRATION = "resubmit_supplier_registration"
+        const val SUPPLIER_REGISTRATION_PROBLEM = "supplier_registration_problem"
 
     }
 }

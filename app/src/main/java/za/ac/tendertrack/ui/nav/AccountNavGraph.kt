@@ -18,7 +18,7 @@ object AccountRoutes {
     const val SUPPLIER_SIGN_IN = "account_supplier_sign_in"
     const val SUPPLIER_SIGN_UP = "account_supplier_sign_up"
     const val FORGOT_PASSWORD = "account_forgot_password"
-    const val SUPPLIER_HOME = "account_supplier_home"
+
 
     fun isAccountRoute(route: String?): Boolean = route?.startsWith("account_") == true
 }
@@ -33,9 +33,7 @@ object AccountRoutes {
  */
 fun NavGraphBuilder.accountGraph(
     navController: NavHostController,
-    currentProfile: () -> Profile?,
-    onSignedIn: (Profile) -> Unit,
-    onSignOut: () -> Unit
+    onSignedIn: (Profile) -> Unit
 ) {
     composable(AccountRoutes.WELCOME) {
         WelcomeScreen(
@@ -85,11 +83,5 @@ fun NavGraphBuilder.accountGraph(
         )
     }
 
-    composable(AccountRoutes.SUPPLIER_HOME) {
-        SupplierHomeScreen(
-            supplierName = currentProfile()?.fullName,
-            onBrowseTenders = { navController.navigate(CitizenRoutes.tenders()) },
-            onSignOut = onSignOut
-        )
-    }
+
 }

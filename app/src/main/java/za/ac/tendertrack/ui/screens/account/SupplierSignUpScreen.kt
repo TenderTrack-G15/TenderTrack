@@ -21,7 +21,7 @@ import za.ac.tendertrack.core.Validate
 import za.ac.tendertrack.data.ServiceLocator
 import za.ac.tendertrack.data.model.*
 import za.ac.tendertrack.data.repo.AuthRepository
-import za.ac.tendertrack.data.repo.SupplierAccountRepository
+import za.ac.tendertrack.data.repo.SupplierPortalRepository
 import za.ac.tendertrack.ui.components.*
 import za.ac.tendertrack.ui.theme.AppColor
 import za.ac.tendertrack.ui.theme.AppType
@@ -50,7 +50,7 @@ data class SupplierSignUpUiState(
 
 class SupplierSignUpViewModel(
     private val auth: AuthRepository = ServiceLocator.authRepository,
-    private val suppliers: SupplierAccountRepository = ServiceLocator.supplierAccountRepository
+    private val suppliers: SupplierPortalRepository = ServiceLocator.supplierPortalRepository
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(SupplierSignUpUiState())
