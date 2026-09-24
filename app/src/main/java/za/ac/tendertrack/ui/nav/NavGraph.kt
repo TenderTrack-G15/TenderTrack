@@ -61,7 +61,9 @@ fun TenderTrackNavGraph(navController: NavHostController = rememberNavController
             !CitizenRoutes.isCitizenRoute(currentRoute) &&
             !AdminRoutes.isAdminRoute(currentRoute) &&
             !AccountRoutes.isAccountRoute(currentRoute) &&
-            !AuditorRoutes.isAuditorRoute(currentRoute),
+            !AuditorRoutes.isAuditorRoute(currentRoute) &&
+            !SupplierRoutes.isSupplierRoute(currentRoute),
+
         drawerContent = {
             AppDrawer(
                 profile = profile,
@@ -88,7 +90,7 @@ fun TenderTrackNavGraph(navController: NavHostController = rememberNavController
             profile = signedInProfile
             val home = when (signedInProfile.role) {
                 za.ac.tendertrack.data.model.UserRole.ADMINISTRATOR -> AdminRoutes.HOME
-                za.ac.tendertrack.data.model.UserRole.SUPPLIER -> AccountRoutes.SUPPLIER_HOME
+                za.ac.tendertrack.data.model.UserRole.SUPPLIER -> SupplierRoutes.HOME
                 za.ac.tendertrack.data.model.UserRole.AUDITOR -> AuditorRoutes.HOME
                 else -> {
                     dashboardViewModel.load()
@@ -109,11 +111,15 @@ fun TenderTrackNavGraph(navController: NavHostController = rememberNavController
 
         NavHost(navController = navController, startDestination = AccountRoutes.WELCOME) {
 
-            // Welcome, supplier sign-up, forgot password, supplier home — see AccountNavGraph.kt
+            // Welcome, supplier sign-in, supplier sign-up, forgot password — see AccountNavGraph.kt
             accountGraph(
                 navController = navController,
+                onSignedIn = openHomeFor
+            )
+
+            supplierGraph(
+                navController = navController,
                 currentProfile = { profile },
-                onSignedIn = openHomeFor,
                 onSignOut = signOutToWelcome
             )
 
