@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>TenderTrack · Restricted</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="css/portal.css">
+</head>
+<body>
+  <div class="signin">
+    <div class="restricted-strip">Restricted system · Authorised administrators only</div>
+
+    <main class="signin-main">
+      <div class="signin-card">
+        <div class="signin-head">
+          <span class="mark"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 16v-1H3.01L3 19c0 1.11.89 2 2 2h14c1.11 0 2-.89 2-2v-4h-7v1h-4zm10-9h-4.01V5l-2-2h-4l-2 2v2H4c-1.1 0-2 .9-2 2v3c0 1.11.89 2 2 2h6v-2h4v2h6c1.1 0 2-.9 2-2V9c0-1.1-.9-2-2-2zm-6 0h-4V5h4v2z"/></svg></span>
+          <h1 class="h1">TenderTrack Administration</h1>
+          <p class="meta">Account, role and audit management</p>
+          <div class="signin-steps" aria-hidden="true"><span id="pip-1" class="on"></span><span id="pip-2"></span></div>
+        </div>
+
+        <div class="card">
+          <div id="message" hidden></div>
+
+          <!-- Step 1: email and password -->
+          <form id="step-password" novalidate>
+            <div class="note note-warn" role="note">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/></svg>
+              <div>
+                <p class="note-title">This system is monitored</p>
+                <p>Every sign-in attempt is recorded with the account, time and device. Unauthorised access to a computer system is a criminal offence.</p>
+              </div>
+            </div>
+            <div class="field">
+              <label class="label" for="email">Email address</label>
+              <input class="input" id="email" type="email" autocomplete="username" placeholder="you@department.gov.za" required>
+              <span class="field-error" id="email-error" hidden></span>
+            </div>
+            <div class="field">
+              <label class="label" for="password">Password</label>
+              <input class="input" id="password" type="password" autocomplete="current-password" placeholder="Enter your password" required>
+              <span class="field-error" id="password-error" hidden></span>
+            </div>
+            <button class="btn btn-primary btn-block" id="password-submit" type="submit">Continue</button>
+          </form>
+
+          <!-- Step 2a: first sign-in — set up the authenticator app -->
+          <form id="step-enrol" novalidate hidden>
+            <h2 class="h2">Set up two-factor sign-in</h2>
+            <p class="meta">Needed once. After this, every sign-in asks for a 6-digit code from your phone.</p>
+            <ol class="steps-list">
+              <li>Install <strong>Google Authenticator</strong> or <strong>Microsoft Authenticator</strong> on your phone.</li>
+              <li>In the app, add an account and scan this code.</li>
+              <li>Type the 6-digit code the app shows.</li>
+            </ol>
+            <img class="qr" id="qr" alt="QR code to add TenderTrack to your authenticator app">
+            <p class="hint" id="secret-label">Can't scan it? Enter this key in the app instead:</p>
+            <p class="secret mono" id="secret"></p>
+            <div class="field">
+              <label class="label" for="enrol-code">6-digit code</label>
+              <input class="input code-input mono" id="enrol-code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="000000">
+              <span class="field-error" id="enrol-error" hidden></span>
+            </div>
+            <button class="btn btn-primary btn-block" id="enrol-submit" type="submit">Verify and continue</button>
+          </form>
+
+          <!-- Step 2b: every later sign-in — enter the code -->
+          <form id="step-code" novalidate hidden>
+            <h2 class="h2">Two-factor authentication</h2>
+            <p class="meta">Enter the 6-digit code from your authenticator app. It changes every 30 seconds.</p>
+            <div class="field" id="code-field">
+              <label class="label" for="code">6-digit code</label>
+              <input class="input code-input mono" id="code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="000000">
+              <span class="field-error" id="code-error" hidden></span>
+            </div>
+            <button class="btn btn-primary btn-block" id="code-submit" type="submit">Verify</button>
+            <p class="hint">Lost your phone? Another administrator removes your old authenticator in Supabase (Authentication → Users), and you set it up again at your next sign-in.</p>
+          </form>
+
+          <p class="tiny" id="back-wrap" hidden><button class="link-btn" id="back" type="button">Use a different account</button></p>
+        </div>
+      </div>
+    </main>
+
+    <footer class="signin-foot tiny">
+      Sessions end after inactivity and when this tab is closed. This portal runs only on this computer.
+    </footer>
+  </div>
+
+  <script src="vendor/supabase.js"></script>
+  <script src="config.js"></script>
+  <script type="module" src="js/signin.js"></script>
+</body>
+</html>
