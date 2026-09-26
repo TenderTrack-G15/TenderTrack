@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>TenderTrack Administration</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="css/portal.css">
+</head>
+<body>
+  <div class="restricted-strip">Restricted system · All activity is recorded</div>
+
+  <!-- Shown until the database confirms an administrator with two-factor sign-in -->
+  <div class="boot" id="boot"><div class="loading"><span class="spinner"></span>Checking your session…</div></div>
+
+  <div class="shell" id="shell" hidden>
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="mark"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 16v-1H3.01L3 19c0 1.11.89 2 2 2h14c1.11 0 2-.89 2-2v-4h-7v1h-4zm10-9h-4.01V5l-2-2h-4l-2 2v2H4c-1.1 0-2 .9-2 2v3c0 1.11.89 2 2 2h6v-2h4v2h6c1.1 0 2-.9 2-2V9c0-1.1-.9-2-2-2zm-6 0h-4V5h4v2z"/></svg></span>
+        <div>
+          <div class="brand-name">TenderTrack</div>
+          <div class="brand-sub">Administration</div>
+        </div>
+      </div>
+      <nav class="nav" id="nav" aria-label="Portal sections"></nav>
+      <p class="sidebar-foot tiny">Administrators manage accounts, roles, activity and records. Tenders, bids, awards and payments are handled by officers in the app.</p>
+    </aside>
+
+    <div class="main">
+      <header class="topbar">
+        <p class="meta session-line" id="session-line"></p>
+        <div class="topbar-user">
+          <div>
+            <div class="card-title" id="me-name"></div>
+            <div class="tiny" id="me-email"></div>
+          </div>
+          <span class="avatar" id="me-initials" aria-hidden="true"></span>
+          <button class="btn btn-secondary btn-sm" id="sign-out" type="button">Sign out</button>
+        </div>
+      </header>
+      <main class="content" id="content"></main>
+    </div>
+  </div>
+
+  <script src="vendor/supabase.js"></script>
+  <script src="config.js"></script>
+  <script type="module" src="js/portal.js"></script>
+</body>
+</html>
