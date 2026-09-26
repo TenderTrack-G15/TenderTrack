@@ -65,8 +65,8 @@ object SupabaseModule {
         /** Redacted view of payments: no invoice numbers, no officials' names. */
         const val PAYMENTS_PUBLIC = "payments_public"
 
-        // Administrator screens — see supabase/admin_access.sql ----------------
-        const val STAFF_INVITATIONS = "staff_invitations"
+        /** Notices written in the admin portal — see supabase/admin_portal.sql */
+        const val ANNOUNCEMENTS = "announcements"
 
         const val TENDER_BOARD = "tender_board"
         const val TENDER_DETAILS = "tender_details"
@@ -89,14 +89,6 @@ object SupabaseModule {
         const val CITIZEN_REPORT_STATUS = "citizen_report_status"
         const val ADD_CITIZEN_REPORT_INFORMATION = "add_citizen_report_information"
         const val WITHDRAW_CITIZEN_REPORT = "withdraw_citizen_report"
-
-        // Administrator — see supabase/admin_access.sql ------------------------
-        const val ADMIN_LIST_ACCOUNTS = "admin_list_accounts"
-        const val ADMIN_SET_ROLE = "admin_set_role"
-        const val ADMIN_SET_SUSPENDED = "admin_set_suspended"
-        const val ADMIN_SAVE_INVITATION = "admin_save_invitation"
-        const val ADMIN_REVOKE_INVITATION = "admin_revoke_invitation"
-        const val ACCOUNT_IS_SUSPENDED = "account_is_suspended"
 
         // Supplier sign-up — see supabase/supplier_accounts.sql ----------------
         const val SAVE_SUPPLIER_PROFILE = "save_supplier_profile"

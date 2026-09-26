@@ -21,9 +21,10 @@ import za.ac.tendertrack.core.friendlyMessage
 import za.ac.tendertrack.data.ServiceLocator
 import za.ac.tendertrack.data.model.Profile
 import za.ac.tendertrack.data.model.UserRole
-import za.ac.tendertrack.data.repo.AdminRepository
+import za.ac.tendertrack.data.repo.ADMIN_PORTAL_MESSAGE
 import za.ac.tendertrack.data.repo.AuthRepository
 import za.ac.tendertrack.data.repo.SIGN_IN_ROLES
+import za.ac.tendertrack.data.repo.SUSPENDED_MESSAGE
 import za.ac.tendertrack.ui.components.*
 import za.ac.tendertrack.ui.theme.AppColor
 import za.ac.tendertrack.ui.theme.Dimens
@@ -47,7 +48,7 @@ enum class SignInAudience {
     val heading: String get() = if (this == GOVERNMENT) "Sign in to TenderTrack" else "Sign in to your supplier account"
 
     val subtitle: String
-        get() = if (this == GOVERNMENT) "Procurement officers and administrators"
+        get() = if (this == GOVERNMENT) "Procurement officers and auditors"
         else "Track your registration and browse published tenders"
 
     /** The message when the account belongs on the other page. */
@@ -63,14 +64,16 @@ enum class SignInAudience {
 /**
  * Why this account may not sign in on this page, or null if it may.
  *
- * Suppliers and government staff have separate pages, so each is sent to the
- * right screens and anyone on the wrong page is told which one to use. Roles
- * whose screens are not built yet are turned away here rather than being shown
- * an empty app.
+ * Administrators never use the app: they work in the admin portal, which needs
+ * a 6-digit code as well as the password. Suppliers and government staff have
+ * separate pages, so each is sent to the right screens and anyone on the wrong
+ * page is told which one to use. Roles whose screens are not built yet are
+ * turned away here rather than being shown an empty app.
  */
 fun signInRefusal(audience: SignInAudience, role: UserRole): String? {
     val isSupplier = role == UserRole.SUPPLIER
     return when {
+        role == UserRole.ADMINISTRATOR -> ADMIN_PORTAL_MESSAGE
         isSupplier != (audience == SignInAudience.SUPPLIER) -> audience.wrongPage
         role !in SIGN_IN_ROLES ->
             "This account is registered as ${role.displayName}. Screens for that role are not in " +
@@ -94,8 +97,7 @@ data class SignInUiState(
 
 class SignInViewModel(
     private val audience: SignInAudience,
-    private val authRepository: AuthRepository = ServiceLocator.authRepository,
-    private val adminRepository: AdminRepository = ServiceLocator.adminRepository
+    private val authRepository: AuthRepository = ServiceLocator.authRepository
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(SignInUiState())
@@ -118,20 +120,6 @@ class SignInViewModel(
         viewModelScope.launch {
             try {
                 val profile = authRepository.signIn(current.email, current.password)
-
-                // A suspended account can still log in to Supabase but has no access
-                // (admin_access.sql). Say so, rather than showing an empty app. If the
-                // check itself fails, carry on: the database blocks the data anyway.
-                val suspended = try {
-                    adminRepository.isCurrentAccountSuspended()
-                } catch (e: Exception) {
-                    false
-                }
-                if (suspended) {
-                    refuse("This account has been suspended. Contact your administrator.")
-                    return@launch
-                }
-
                 val refusal = signInRefusal(audience, profile.role)
                 if (refusal != null) {
                     refuse(refusal)
@@ -140,12 +128,11 @@ class SignInViewModel(
                     onSuccess(profile)
                 }
             } catch (e: Exception) {
-                _state.update {
-                    it.copy(
-                        submitting = false,
-                        formError = e.friendlyMessage().lineSequence().firstOrNull { l -> l.isNotBlank() }?.trim()
-                    )
-                }
+                // Supabase says "User is banned" for an account the administrator
+                // suspended in the admin portal.
+                val message = if (e.message.orEmpty().contains("banned", ignoreCase = true)) SUSPENDED_MESSAGE
+                else e.friendlyMessage().lineSequence().firstOrNull { l -> l.isNotBlank() }?.trim()
+                _state.update { it.copy(submitting = false, formError = message) }
             }
         }
     }
@@ -233,7 +220,7 @@ fun SignInScreen(
         NoteBanner(
             title = "Role is not selected here",
             text = "Your permissions come from the role assigned to your account and are applied to every " +
-                "request by the database. Only an administrator can change a role.",
+                "request by the database. Only an administrator can change a role, in the admin portal.",
             tone = NoteTone.Neutral,
             icon = Icons.Default.Shield
         )
@@ -243,8 +230,9 @@ fun SignInScreen(
             NoteBanner(
                 title = "Running on sample data",
                 text = if (audience == SignInAudience.GOVERNMENT)
-                    "Any password of 8 characters or more works. An email starting with \"admin\" opens the " +
-                        "Administrator screens; any other email opens the Procurement Officer screens."
+                    "Any password of 8 characters or more works. An email starting with \"auditor\" opens the " +
+                        "Auditor screens; any other email opens the Procurement Officer screens. Administrators " +
+                        "use the admin portal instead."
                 else
                     "Any password of 8 characters or more works. An email starting with \"supplier\", or one " +
                         "you signed up with, opens the Supplier screens.",

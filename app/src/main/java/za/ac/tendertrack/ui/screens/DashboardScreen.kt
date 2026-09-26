@@ -82,6 +82,7 @@ fun DashboardScreen(
             title = "Dashboard",
             subtitle = listOfNotNull(profile?.department, profile?.fullName).joinToString(" · ")
         )
+        AnnouncementsBanner(AnnouncementViewer.STAFF)
 
         when (val s = state) {
             is UiState.Loading -> LoadingState()

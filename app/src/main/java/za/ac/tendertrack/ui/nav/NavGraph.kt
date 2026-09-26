@@ -59,7 +59,6 @@ fun TenderTrackNavGraph(navController: NavHostController = rememberNavController
         // supplier or administrator screens.
         gesturesEnabled = currentRoute != Routes.SIGN_IN &&
             !CitizenRoutes.isCitizenRoute(currentRoute) &&
-            !AdminRoutes.isAdminRoute(currentRoute) &&
             !AccountRoutes.isAccountRoute(currentRoute) &&
             !AuditorRoutes.isAuditorRoute(currentRoute) &&
             !SupplierRoutes.isSupplierRoute(currentRoute),
@@ -89,7 +88,6 @@ fun TenderTrackNavGraph(navController: NavHostController = rememberNavController
         val openHomeFor: (Profile) -> Unit = { signedInProfile ->
             profile = signedInProfile
             val home = when (signedInProfile.role) {
-                za.ac.tendertrack.data.model.UserRole.ADMINISTRATOR -> AdminRoutes.HOME
                 za.ac.tendertrack.data.model.UserRole.SUPPLIER -> SupplierRoutes.HOME
                 za.ac.tendertrack.data.model.UserRole.AUDITOR -> AuditorRoutes.HOME
                 else -> {
@@ -307,12 +305,6 @@ fun TenderTrackNavGraph(navController: NavHostController = rememberNavController
             // Public / citizen screens — see CitizenNavGraph.kt
             citizenGraph(navController)
 
-            // Administrator screens — see AdminNavGraph.kt
-            adminGraph(
-                navController = navController,
-                currentProfile = { profile },
-                onSignOut = signOutToWelcome
-            )
             // Auditor screens — see AuditorNavGraph.kt
             auditorGraph(
                 navController = navController,

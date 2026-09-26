@@ -63,6 +63,7 @@ fun WelcomeScreen(
             style = AppType.Meta,
             textAlign = TextAlign.Center
         )
+        AnnouncementsBanner(AnnouncementViewer.PUBLIC, Modifier.padding(top = 24.dp))
 
         // -- 1. Members of the public: the highlighted action (FR13–FR15) -------
         Spacer(Modifier.height(40.dp))

@@ -91,6 +91,7 @@ fun AuditorHomeScreen(
             title = "Audit and verification",
             subtitle = "Signed in as $auditorName · read-only across every record"
         )
+        AnnouncementsBanner(AnnouncementViewer.STAFF)
 
         when (val result = state) {
             is UiState.Loading -> LoadingState(message = "Loading records…")
