@@ -62,6 +62,7 @@ fun DashboardScreen(
     onOpenSuppliers: () -> Unit,
     onOpenTenders: () -> Unit,
     onOpenFunds: () -> Unit,
+    onOpenBudget: () -> Unit,
     viewModel: DashboardViewModel = viewModel()
 ) {
     val state by viewModel.state.collectAsState()
@@ -92,7 +93,8 @@ fun DashboardScreen(
                 onOpenFlags = onOpenFlags,
                 onOpenSuppliers = onOpenSuppliers,
                 onOpenTenders = onOpenTenders,
-                onOpenFunds = onOpenFunds
+                onOpenFunds = onOpenFunds,
+                onOpenBudget = onOpenBudget
             )
         }
     }
@@ -104,7 +106,8 @@ private fun ColumnScope.DashboardContent(
     onOpenFlags: () -> Unit,
     onOpenSuppliers: () -> Unit,
     onOpenTenders: () -> Unit,
-    onOpenFunds: () -> Unit
+    onOpenFunds: () -> Unit,
+    onOpenBudget: () -> Unit
 ) {
     Column {
         Eyebrow("Tender lifecycle")
@@ -145,9 +148,9 @@ private fun ColumnScope.DashboardContent(
         Spacer(Modifier.height(10.dp))
         StatGrid(
             listOf<StatGridTile>(
-                { m ->
+                { m: Modifier ->
                     StatTile("Budget allocated", Format.moneyCompact(summary.funds.allocated),
-                        m, "${summary.funds.financialYear} financial year", money = true, onClick = onOpenFunds)
+                        m, "${summary.funds.financialYear} financial year", money = true, onClick = onOpenBudget)
                 },
                 { m ->
                     StatTile("Funds utilised", Format.moneyCompact(summary.funds.disbursed),

@@ -16,6 +16,8 @@ object Routes {
     const val SUPPLIER_REVIEW = "supplier/{supplierId}"
     const val RECORD_PAYMENT = "payment?tenderId={tenderId}"
     const val FUND_UTILISATION = "funds"
+
+    const val BUDGET_ALLOCATION = "budget_allocation"
     const val FLAGS = "flags"
     const val FLAG_DETAIL = "flag/{flagId}"
     const val REPORTS = "reports"

@@ -34,8 +34,9 @@ fun AppCard(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            // Intrinsic height so the accent stripe can match the card's height.
-            .height(IntrinsicSize.Min)
+            // Intrinsic height only when there is an accent stripe to stretch. Measuring
+            // it on every card cut the bottom off stat tiles, whose labels use minLines.
+            .then(if (accent != null) Modifier.height(IntrinsicSize.Min) else Modifier)
             .clip(RoundedCornerShape(Dimens.RadiusCard))
             .background(background)
             .border(Dimens.BorderWidth, border, RoundedCornerShape(Dimens.RadiusCard))
