@@ -63,4 +63,9 @@ object ServiceLocator {
     val auditorRepository: AuditorRepository by lazy {
         SupabaseModule.client?.let { SupabaseAuditorRepository(it) } ?: SampleAuditorRepository()
     }
+
+    /** Department budgets for the Budget Allocation screen (FR11). */
+    val budgetRepository: BudgetRepository by lazy {
+        SupabaseModule.client?.let { SupabaseBudgetRepository(it) } ?: SampleBudgetRepository()
+    }
 }

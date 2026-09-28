@@ -146,6 +146,7 @@ fun TenderTrackNavGraph(navController: NavHostController = rememberNavController
                     onOpenSuppliers = { go(Routes.SUPPLIERS) },
                     onOpenTenders = { go(Routes.TENDERS) },
                     onOpenFunds = { go(Routes.FUND_UTILISATION) },
+                    onOpenBudget = { navController.navigate(Routes.BUDGET_ALLOCATION) },
                     viewModel = dashboardViewModel
                 )
             }
@@ -265,6 +266,14 @@ fun TenderTrackNavGraph(navController: NavHostController = rememberNavController
                 FundUtilisationScreen(
                     onMenu = { scope.launch { drawerState.open() } },
                     onOpenTender = { navController.navigate(Routes.tenderDetail(it)) }
+                )
+            }
+
+            composable(Routes.BUDGET_ALLOCATION) {
+                BudgetAllocationScreen(
+                    ownDepartment = profile?.department,
+                    onBack = { navController.popBackStack() },
+                    onOpenUtilisation = { go(Routes.FUND_UTILISATION) }
                 )
             }
 

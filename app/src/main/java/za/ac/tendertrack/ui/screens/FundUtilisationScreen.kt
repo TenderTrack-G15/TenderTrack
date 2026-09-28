@@ -84,14 +84,29 @@ fun FundUtilisationScreen(
                     small = true
                 )
 
-                StatGrid(
-                    listOf<StatGridTile>(
-                        { m -> StatTile("Allocated", Format.moneyCompact(summary.allocated), m, money = true) },
-                        { m -> StatTile("Committed (awarded)", Format.moneyCompact(summary.committed), m, money = true) },
-                        { m -> StatTile("Disbursed", Format.moneyCompact(summary.disbursed), m, money = true) },
-                        { m -> StatTile("Uncommitted", Format.moneyCompact(summary.uncommitted), m, money = true) }
-                    )
-                )
+                Column(verticalArrangement = Arrangement.spacedBy(Dimens.GridGap)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(Dimens.GridGap)) {
+                        StatTile(
+                            "Allocated", Format.moneyCompact(summary.allocated), Modifier.weight(1f),
+                            "Budget for the year", money = true
+                        )
+                        StatTile(
+                            "Committed (awarded)", Format.moneyCompact(summary.committed), Modifier.weight(1f),
+                            "${Format.percent((summary.committed / summary.allocated.coerceAtLeast(1.0)).toFloat(), 1)} of allocation",
+                            money = true
+                        )
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(Dimens.GridGap)) {
+                        StatTile(
+                            "Disbursed", Format.moneyCompact(summary.disbursed), Modifier.weight(1f),
+                            "${Format.percent(summary.disbursedFraction, 1)} of allocation", money = true
+                        )
+                        StatTile(
+                            "Uncommitted", Format.moneyCompact(summary.uncommitted), Modifier.weight(1f),
+                            "Still available to award", money = true
+                        )
+                    }
+                }
 
                 AppCard {
                     Text("Allocation breakdown", style = AppType.H2)
