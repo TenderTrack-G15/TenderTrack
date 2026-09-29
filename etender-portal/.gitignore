@@ -1,0 +1,5 @@
+# Holds the Supabase secret key (and an email password) — never commit it.
+.env
+# The demo mailbox: emails with award codes, kept on this computer only.
+data/
+node_modules/
