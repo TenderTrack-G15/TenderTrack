@@ -22,14 +22,28 @@ import za.ac.tendertrack.core.Format
 import za.ac.tendertrack.core.UiState
 import za.ac.tendertrack.data.ServiceLocator
 import za.ac.tendertrack.data.model.*
+import za.ac.tendertrack.data.repo.AwardRepository
+import za.ac.tendertrack.data.repo.RegistrationRepository
 import za.ac.tendertrack.data.repo.SupplierPortalRepository
 import za.ac.tendertrack.ui.components.*
 import za.ac.tendertrack.ui.theme.AppColor
 import za.ac.tendertrack.ui.theme.AppType
 import za.ac.tendertrack.ui.theme.Dimens
 
-/** The home screen's data: the tender board and the supplier's own registration. */
-data class SupplierHome(val board: List<TenderBoardItem>, val profile: SupplierProfile?) {
+/** The home screen's data: the tender board, the supplier's registration and its awards. */
+data class SupplierHome(
+    val board: List<TenderBoardItem>,
+    val profile: SupplierProfile?,
+    val awards: List<SupplierAward> = emptyList(),
+    /** Null when it could not be checked; the database still enforces it. */
+    val registration: TenderTrackRegistration? = null
+) {
+    /** Registered on the eTender portal but not yet for TenderTrack. */
+    val mustRegister: Boolean get() = registration != null && !registration.appRegistered
+
+    /** Awards whose emailed code has not been entered yet. */
+    val awaitingCode: List<SupplierAward> get() = awards.filter { it.canEnterCode }
+
     val open: List<TenderBoardItem> get() = board.filter { it.openForBids }
     val closingSoon: Int get() = open.count { (Format.daysUntil(it.closingDate) ?: 99) in 0..7 }
     val documentsOutstanding: Int
@@ -54,7 +68,9 @@ data class SupplierHomeUiState(
 }
 
 class SupplierHomeViewModel(
-    private val repository: SupplierPortalRepository = ServiceLocator.supplierPortalRepository
+    private val repository: SupplierPortalRepository = ServiceLocator.supplierPortalRepository,
+    private val awardRepository: AwardRepository = AwardRepository.instance,
+    private val registrationRepository: RegistrationRepository = RegistrationRepository.instance
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(SupplierHomeUiState())
@@ -64,7 +80,17 @@ class SupplierHomeViewModel(
         _state.update { it.copy(home = UiState.Loading) }
         viewModelScope.launch {
             val result = try {
-                UiState.Success(SupplierHome(repository.board(), runCatching { repository.myProfile() }.getOrNull()))
+                val registration = runCatching { registrationRepository.status() }.getOrNull()
+                UiState.Success(
+                    SupplierHome(
+                        board = repository.board(),
+                        profile = runCatching { repository.myProfile() }.getOrNull(),
+                        // Awards must not stop the tender board from loading.
+                        awards = if (registration?.appRegistered == false) emptyList()
+                        else runCatching { awardRepository.awards() }.getOrDefault(emptyList()),
+                        registration = registration
+                    )
+                )
             } catch (e: Exception) {
                 UiState.Error(e.supplierMessage())
             }
@@ -77,14 +103,17 @@ class SupplierHomeViewModel(
 }
 
 /**
- * Supplier home: the tenders available to bid on, with a search, and the state
- * of the supplier's own registration.
+ * Supplier home: the tenders available to bid on, with a search, the state
+ * of the supplier's own registration, and its awards.
  */
 @Composable
 fun SupplierHomeScreen(
     supplierName: String,
     onOpenTender: (String) -> Unit,
     onOpenCompany: () -> Unit,
+    onOpenAwards: () -> Unit,
+    onClaim: (String) -> Unit,
+    onRegister: () -> Unit,
     onSignOut: () -> Unit,
     viewModel: SupplierHomeViewModel = viewModel()
 ) {
@@ -93,17 +122,25 @@ fun SupplierHomeScreen(
     // Reloads whenever the screen comes back into view, e.g. after editing the company.
     LaunchedEffect(Unit) { viewModel.load() }
 
+    val loaded = (state.home as? UiState.Success)?.data
+    val waiting = loaded?.awaitingCode?.size ?: 0
+    val signOut = TopBarAction(Icons.AutoMirrored.Filled.Logout, "Sign out") { onSignOut() }
+
     AppScaffold(
         title = "TenderTrack",
-        actions = listOf(
+        // Until the company has registered for TenderTrack, only signing out is offered.
+        actions = if (loaded?.mustRegister == true) listOf(signOut) else listOf(
+            TopBarAction(Icons.Default.EmojiEvents, "Awards", badgeCount = waiting) { onOpenAwards() },
             TopBarAction(Icons.Default.Business, "My company") { onOpenCompany() },
-            TopBarAction(Icons.AutoMirrored.Filled.Logout, "Sign out") { onSignOut() }
+            signOut
         )
     ) {
         when (val result = state.home) {
             is UiState.Loading -> LoadingState(message = "Loading tenders…")
             is UiState.Error -> ErrorState(result.message, onRetry = viewModel::load)
-            is UiState.Success -> {
+            is UiState.Success -> if (result.data.mustRegister) {
+                RegisterFirst(result.data, supplierName, onRegister)
+            } else {
                 val home = result.data
                 ScreenHeading(
                     eyebrow = "Supplier",
@@ -133,6 +170,37 @@ fun SupplierHomeScreen(
                         Modifier.weight(1f), "Of ${home.profile?.documentsRequired ?: 6} required",
                         alert = home.documentsOutstanding > 0,
                         onClick = onOpenCompany
+                    )
+                }
+
+                Spacer(Modifier.height(Dimens.GridGap))
+                Row(horizontalArrangement = Arrangement.spacedBy(Dimens.GridGap)) {
+                    StatTile(
+                        "Awaiting your code", "${home.awaitingCode.size}", Modifier.weight(1f), "Claim under Awards",
+                        alert = home.awaitingCode.isNotEmpty(),
+                        onClick = onOpenAwards
+                    )
+                    StatTile(
+                        "Active contracts",
+                        "${home.awards.count { it.isClaimed && it.status != TenderStatus.COMPLETED }}",
+                        Modifier.weight(1f), "Deliverables to update",
+                        onClick = onOpenAwards
+                    )
+                }
+
+                home.awaitingCode.firstOrNull()?.let { award ->
+                    NoteBanner(
+                        title = "You have been awarded ${award.referenceNumber}",
+                        text = "Enter the 10-digit award code emailed to ${award.sentTo.ifBlank { "your company" }} " +
+                            "to claim the contract. Until then you cannot start work on it.",
+                        tone = NoteTone.Success,
+                        icon = Icons.Default.EmojiEvents
+                    )
+                    PrimaryButton(
+                        text = "Claim award",
+                        icon = Icons.Default.Key,
+                        // Straight to the code screen when only one award is waiting.
+                        onClick = { if (home.awaitingCode.size == 1) onClaim(award.tenderId) else onOpenAwards() }
                     )
                 }
 
@@ -176,6 +244,28 @@ fun SupplierHomeScreen(
             }
         }
     }
+}
+
+/**
+ * Shown instead of the home screen when the company registered on the eTender
+ * portal but has not registered for TenderTrack yet.
+ */
+@Composable
+private fun RegisterFirst(home: SupplierHome, supplierName: String, onRegister: () -> Unit) {
+    ScreenHeading(
+        eyebrow = "Supplier",
+        title = home.registration?.companyName?.ifBlank { null } ?: home.profile?.companyName ?: "Welcome",
+        subtitle = "Signed in as $supplierName"
+    )
+    NoteBanner(
+        title = "Finish registering for TenderTrack",
+        text = "Your company is registered on the eTender portal. To use TenderTrack as well, confirm it here " +
+            "with your CSD and registration numbers and a 6-digit code emailed to the company. Until then you " +
+            "cannot claim awards or update deliverables in TenderTrack.",
+        tone = NoteTone.Warning,
+        icon = Icons.Default.Shield
+    )
+    PrimaryButton(text = "Register for TenderTrack", icon = Icons.Default.HowToReg, onClick = onRegister)
 }
 
 @Composable

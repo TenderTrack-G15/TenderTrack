@@ -114,8 +114,9 @@ fun MyCompanyScreen(
                 if (profile == null) {
                     EmptyState(
                         title = "No registration",
-                        message = "This account has no supplier registration. Sign out and register a company " +
-                            "with \"Register an account\".",
+                        message = "This account has no supplier registration. Register your company on the " +
+                            "eTender portal first, then register for TenderTrack: Supplier login, then " +
+                            "\"Register an account\".",
                         icon = Icons.Default.Business
                     )
                     return@AppScaffold
