@@ -247,10 +247,12 @@ private fun PackBody(pack: TenderPack) {
     }
 
     NoteBanner(
-        title = "Submitting a bid",
-        text = "Bids are submitted the way this notice describes, not yet inside the app. Submitting from " +
-            "TenderTrack comes with the bidding module.",
-        tone = NoteTone.Neutral,
+        title = "Bidding happens on the eTender portal",
+        text = "TenderTrack helps you find and follow tenders; it does not take bids. Submit your bid on the " +
+            "eTender portal, signing in with the same email and password. If your company is awarded the " +
+            "tender, a 10-digit award code is emailed to you: enter it in TenderTrack under Awards to claim " +
+            "the contract.",
+        tone = NoteTone.Info,
         icon = Icons.Default.Info
     )
 }

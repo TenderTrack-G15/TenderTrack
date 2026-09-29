@@ -3,12 +3,12 @@ package za.ac.tendertrack.ui.screens.account
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -18,124 +18,232 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import za.ac.tendertrack.core.Validate
+import za.ac.tendertrack.core.friendlyMessage
 import za.ac.tendertrack.data.ServiceLocator
 import za.ac.tendertrack.data.model.*
 import za.ac.tendertrack.data.repo.AuthRepository
-import za.ac.tendertrack.data.repo.SupplierPortalRepository
+import za.ac.tendertrack.data.repo.RegistrationRepository
+import za.ac.tendertrack.data.repo.SampleRegistrationRepository
 import za.ac.tendertrack.ui.components.*
 import za.ac.tendertrack.ui.theme.AppColor
 import za.ac.tendertrack.ui.theme.AppType
+import za.ac.tendertrack.ui.theme.Dimens
 
-// ---------------------------------------------------------------------------
-// State + ViewModel
-// ---------------------------------------------------------------------------
+/*
+ * Supplier registration for TenderTrack.
+ *
+ * A company registers on BOTH systems, on purpose:
+ *   1. on the eTender portal (the government's record): company, contact,
+ *      compliance, banking, capabilities and documents;
+ *   2. here, for TenderTrack: the same email and password, the CSD and company
+ *      registration numbers from the portal registration, and a 6-digit code
+ *      emailed to the company's contact address.
+ * A stolen password alone is therefore not enough to get a company into
+ * TenderTrack, and the database refuses awards until both are done.
+ */
 
-/** D3 5.3: "Create Account", then "Company Profile". CHECK_EMAIL only when Supabase requires confirmation. */
-enum class SignUpStep { ACCOUNT, COMPANY, CHECK_EMAIL }
+enum class SignUpStep { DETAILS, CODE, DONE }
 
 data class SupplierSignUpUiState(
-    val step: SignUpStep = SignUpStep.ACCOUNT,
+    /** True while checking whether someone is already signed in. */
+    val checking: Boolean = true,
+    val step: SignUpStep = SignUpStep.DETAILS,
+    /** Set when a supplier is already signed in (sent here from the home screen). */
+    val signedInAs: Profile? = null,
+    val codePending: Boolean = false,
     val email: String = "",
     val password: String = "",
-    val confirm: String = "",
-    val emailError: String? = null,
-    val passwordError: String? = null,
-    val confirmError: String? = null,
-    /** The mobile number is captured on step 1 but stored with the company profile. */
-    val company: CompanyForm = CompanyForm(),
-    val companyErrors: Map<CompanyField, String> = emptyMap(),
+    val csdNumber: String = "",
+    val registrationNumber: String = "",
+    val errors: Map<String, String> = emptyMap(),
+    val sentTo: String = "",
+    val code: String = "",
+    val codeError: String? = null,
+    val needNewCode: Boolean = false,
     val formError: String? = null,
+    val notice: String? = null,
+    val doneMessage: String = "",
     val submitting: Boolean = false
 )
 
 class SupplierSignUpViewModel(
     private val auth: AuthRepository = ServiceLocator.authRepository,
-    private val suppliers: SupplierPortalRepository = ServiceLocator.supplierPortalRepository
+    private val registration: RegistrationRepository = RegistrationRepository.instance
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(SupplierSignUpUiState())
     val state: StateFlow<SupplierSignUpUiState> = _state.asStateFlow()
 
-    fun onEmail(v: String) = _state.update { it.copy(email = v.trim(), emailError = null, formError = null) }
-    fun onPassword(v: String) = _state.update { it.copy(password = v, passwordError = null, formError = null) }
-    fun onConfirm(v: String) = _state.update { it.copy(confirm = v, confirmError = null, formError = null) }
+    /** True when this screen signed the person in, so leaving it half-way signs them out again. */
+    private var signedInHere = false
 
-    fun onCompany(field: CompanyField?, form: CompanyForm) = _state.update {
-        it.copy(company = form, companyErrors = if (field == null) it.companyErrors else it.companyErrors - field,
-            formError = null)
-    }
-
-    // -- Step 1: account ------------------------------------------------------------
-
-    fun continueToCompany() {
-        val s = _state.value
-        val emailError = Validate.email(s.email)
-        val passwordError = Validate.password(s.password)
-        val confirmError = confirmError(s.password, s.confirm)
-        val mobileError = SupplierRules.mobile(s.company.mobileNumber)
-        if (emailError != null || passwordError != null || confirmError != null || mobileError != null) {
-            _state.update {
-                it.copy(emailError = emailError, passwordError = passwordError, confirmError = confirmError,
-                    companyErrors = mobileError?.let { m -> it.companyErrors + (CompanyField.MOBILE to m) }
-                        ?: it.companyErrors)
+    init {
+        viewModelScope.launch {
+            val profile = runCatching { auth.currentProfile() }.getOrNull()
+            if (profile?.role != UserRole.SUPPLIER) {
+                _state.update { it.copy(checking = false) }
+                return@launch
             }
-            return
+            val status = runCatching { registration.status() }.getOrNull()
+            _state.update {
+                it.copy(
+                    checking = false,
+                    signedInAs = profile,
+                    codePending = status?.codePending == true,
+                    sentTo = status?.sentTo.orEmpty(),
+                    step = if (status?.appRegistered == true) SignUpStep.DONE else it.step,
+                    doneMessage = if (status?.appRegistered == true) "You are already registered for TenderTrack." else ""
+                )
+            }
         }
-        _state.update { it.copy(step = SignUpStep.COMPANY, formError = null) }
     }
 
-    /** Returns true if it went back a step, false if the screen should close. */
-    fun back(): Boolean {
-        if (_state.value.step != SignUpStep.COMPANY || _state.value.submitting) return false
-        _state.update { it.copy(step = SignUpStep.ACCOUNT, formError = null) }
-        return true
-    }
+    fun onEmail(v: String) = _state.update { it.copy(email = v.trim(), errors = it.errors - "email", formError = null) }
+    fun onPassword(v: String) = _state.update { it.copy(password = v, errors = it.errors - "password", formError = null) }
+    fun onCsd(v: String) = _state.update { it.copy(csdNumber = v.uppercase(), errors = it.errors - "csd", formError = null) }
+    fun onRegistrationNumber(v: String) =
+        _state.update { it.copy(registrationNumber = v, errors = it.errors - "registration", formError = null) }
+    fun onCode(v: String) = _state.update { it.copy(code = RegistrationInput.cleanCode(v), codeError = null, notice = null) }
 
-    // -- Step 2: company profile, then create the account ------------------------------
+    // -- Step 1: find the portal registration and send the code ------------------------
 
-    fun submit(onSignedIn: (Profile) -> Unit) {
+    fun sendCode() {
         val s = _state.value
         if (s.submitting) return
-        val errors = s.company.errors(includeMobile = false)
+        val errors = buildMap {
+            if (s.signedInAs == null) {
+                Validate.email(s.email)?.let { put("email", it) }
+                Validate.password(s.password)?.let { put("password", it) }
+            }
+            RegistrationInput.csd(s.csdNumber)?.let { put("csd", it) }
+            RegistrationInput.registrationNumber(s.registrationNumber)?.let { put("registration", it) }
+        }
         if (errors.isNotEmpty()) {
-            _state.update { it.copy(companyErrors = errors, formError = "Please correct the highlighted fields.") }
+            _state.update { it.copy(errors = errors) }
             return
         }
-        val company = s.company.toProfile()
-
         _state.update { it.copy(submitting = true, formError = null) }
         viewModelScope.launch {
             try {
-                // Catch a duplicate before Supabase does: its own error only says
-                // "Database error saving new user". If the check itself fails, carry
-                // on — the database still refuses a duplicate.
-                val problem = try {
-                    suppliers.registrationProblem(company.registrationNumber, company.csdNumber)
-                } catch (e: Exception) {
-                    null
-                }
-                if (problem != null) {
-                    val field = if (problem.contains("CSD")) CompanyField.CSD_NUMBER else CompanyField.REGISTRATION_NUMBER
-                    _state.update {
-                        it.copy(submitting = false, companyErrors = it.companyErrors + (field to problem),
-                            formError = problem)
-                    }
-                    return@launch
-                }
-
-                when (val result = auth.signUpSupplier(s.email, s.password, company)) {
-                    is SignUpResult.SignedIn -> {
-                        _state.update { it.copy(submitting = false) }
-                        onSignedIn(result.profile)
-                    }
-                    SignUpResult.ConfirmEmail ->
-                        _state.update { it.copy(submitting = false, step = SignUpStep.CHECK_EMAIL) }
+                if (_state.value.signedInAs == null) signInWithPortalAccount(s.email, s.password) ?: return@launch
+                val sent = registration.start(s.csdNumber, s.registrationNumber)
+                _state.update {
+                    if (sent.already) it.copy(submitting = false, step = SignUpStep.DONE,
+                        doneMessage = "You are already registered for TenderTrack.")
+                    else it.copy(submitting = false, step = SignUpStep.CODE, sentTo = sent.sentTo, code = "",
+                        codeError = null, needNewCode = false, notice = "A 6-digit code was sent to ${sent.sentTo}.")
                 }
             } catch (e: Exception) {
-                _state.update { it.copy(submitting = false, formError = e.accountMessage()) }
+                _state.update { it.copy(submitting = false, formError = e.shortMessage()) }
             }
         }
     }
+
+    /** Signs in with the portal's email and password. Returns null (with a message shown) if it fails. */
+    private suspend fun signInWithPortalAccount(email: String, password: String): Profile? {
+        val profile = try {
+            auth.signIn(email, password)
+        } catch (e: Exception) {
+            val raw = e.message.orEmpty()
+            val message = when {
+                raw.contains("Invalid login credentials", true) ->
+                    "No eTender portal account has this email and password. Register your company on the " +
+                        "eTender portal first, then come back."
+                raw.contains("banned", true) -> "This account has been suspended. Contact the department."
+                else -> e.shortMessage()
+            }
+            _state.update { it.copy(submitting = false, formError = message) }
+            return null
+        }
+        if (profile.role != UserRole.SUPPLIER) {
+            runCatching { auth.signOut() }
+            _state.update {
+                it.copy(submitting = false, formError = "This is not a supplier account. Government officials use " +
+                    "the Government Official login.")
+            }
+            return null
+        }
+        signedInHere = true
+        _state.update { it.copy(signedInAs = profile) }
+        return profile
+    }
+
+    /** "I already have a code": straight to step 2. */
+    fun useExistingCode() = _state.update { it.copy(step = SignUpStep.CODE, formError = null, notice = null) }
+
+    // -- Step 2: the code from the email ---------------------------------------------------
+
+    fun verify() {
+        val s = _state.value
+        if (s.submitting) return
+        RegistrationInput.code(s.code)?.let { message ->
+            _state.update { it.copy(codeError = message) }
+            return
+        }
+        _state.update { it.copy(submitting = true, codeError = null, notice = null) }
+        viewModelScope.launch {
+            try {
+                val result = registration.complete(s.code)
+                _state.update {
+                    if (result.ok) it.copy(submitting = false, step = SignUpStep.DONE, doneMessage = result.message)
+                    else it.copy(submitting = false, code = "", codeError = result.message, needNewCode = result.needNewCode)
+                }
+            } catch (e: Exception) {
+                _state.update { it.copy(submitting = false, codeError = e.shortMessage()) }
+            }
+        }
+    }
+
+    fun resend() {
+        val s = _state.value
+        if (s.submitting) return
+        if (RegistrationInput.csd(s.csdNumber) != null || RegistrationInput.registrationNumber(s.registrationNumber) != null) {
+            // Came straight to step 2 without typing the numbers: they are needed for a new code.
+            _state.update { it.copy(step = SignUpStep.DETAILS, formError = "Enter your CSD and registration numbers to get a new code.") }
+            return
+        }
+        _state.update { it.copy(submitting = true, codeError = null, notice = null) }
+        viewModelScope.launch {
+            try {
+                val sent = registration.start(s.csdNumber, s.registrationNumber)
+                _state.update {
+                    it.copy(submitting = false, sentTo = sent.sentTo, needNewCode = false, code = "",
+                        notice = "A new code was sent to ${sent.sentTo}. Earlier codes no longer work.")
+                }
+            } catch (e: Exception) {
+                _state.update { it.copy(submitting = false, codeError = e.shortMessage()) }
+            }
+        }
+    }
+
+    // -- Leaving -------------------------------------------------------------------------------
+
+    /** Returns true if it went back a step, false if the screen should close. */
+    fun back(): Boolean {
+        if (_state.value.step != SignUpStep.CODE || _state.value.submitting) return false
+        _state.update { it.copy(step = SignUpStep.DETAILS, codeError = null, notice = null) }
+        return true
+    }
+
+    /** Leaving before the end: an account this screen signed in is signed out again. */
+    fun leave(then: () -> Unit) {
+        if (signedInHere && _state.value.step != SignUpStep.DONE) {
+            viewModelScope.launch {
+                runCatching { auth.signOut() }
+                then()
+            }
+        } else then()
+    }
+
+    fun finish(onSignedIn: (Profile) -> Unit) {
+        viewModelScope.launch {
+            val profile = runCatching { auth.currentProfile() }.getOrNull() ?: _state.value.signedInAs
+            if (profile != null) onSignedIn(profile)
+        }
+    }
+
+    private fun Throwable.shortMessage(): String =
+        friendlyMessage().lineSequence().firstOrNull { it.isNotBlank() }?.trim() ?: "Something went wrong. Please try again."
 }
 
 // ---------------------------------------------------------------------------
@@ -143,9 +251,9 @@ class SupplierSignUpViewModel(
 // ---------------------------------------------------------------------------
 
 /**
- * Supplier Sign-up — Deliverable 3, section 5.3. The Supplier role is applied
- * automatically; the registration goes to the officers' Supplier
- * Registrations queue, status "awaiting verification".
+ * Supplier registration for TenderTrack (Deliverable 3, section 5.3), opened
+ * from "Register an account" on the Supplier login, or from the supplier's home
+ * screen when the company has not finished registering here.
  */
 @Composable
 fun SupplierSignUpScreen(
@@ -157,117 +265,169 @@ fun SupplierSignUpScreen(
     val state by viewModel.state.collectAsState()
 
     // The phone's Back button goes from step 2 to step 1, not out of the form.
-    BackHandler(enabled = state.step == SignUpStep.COMPANY) { viewModel.back() }
+    BackHandler(enabled = state.step == SignUpStep.CODE) { viewModel.back() }
 
     AppScaffold(
-        title = "Supplier sign-up",
-        onBack = { if (!viewModel.back()) onBack() }
+        title = "Supplier registration",
+        onBack = { if (!viewModel.back()) viewModel.leave(onBack) }
     ) {
-        when (state.step) {
-            SignUpStep.ACCOUNT -> AccountStep(state, viewModel, onSignIn)
-            SignUpStep.COMPANY -> CompanyStep(state, viewModel, onSignedIn)
-            SignUpStep.CHECK_EMAIL -> CheckEmailStep(state.email, onSignIn)
+        when {
+            state.checking -> LoadingState(message = "One moment…")
+            state.step == SignUpStep.DETAILS -> DetailsStep(state, viewModel) { viewModel.leave(onSignIn) }
+            state.step == SignUpStep.CODE -> CodeStep(state, viewModel)
+            else -> DoneStep(state) { viewModel.finish(onSignedIn) }
         }
     }
 }
 
 @Composable
-private fun AccountStep(state: SupplierSignUpUiState, viewModel: SupplierSignUpViewModel, onSignIn: () -> Unit) {
+private fun DetailsStep(state: SupplierSignUpUiState, viewModel: SupplierSignUpViewModel, onSignIn: () -> Unit) {
     ScreenHeading(
         eyebrow = "Step 1 of 2",
-        title = "Create your supplier account",
-        subtitle = "The Supplier role is applied automatically."
-    )
-    AppTextField(
-        label = "Email address",
-        value = state.email,
-        onValueChange = viewModel::onEmail,
-        placeholder = "you@company.co.za",
-        leadingIcon = Icons.Default.MailOutline,
-        keyboardType = KeyboardType.Email,
-        hint = "Your registration outcome is sent here.",
-        error = state.emailError
-    )
-    MobileField(
-        value = state.company.mobileNumber,
-        error = state.companyErrors[CompanyField.MOBILE],
-        enabled = true,
-        onValueChange = { viewModel.onCompany(CompanyField.MOBILE, state.company.copy(mobileNumber = it)) }
-    )
-    AppTextField(
-        label = "Password",
-        value = state.password,
-        onValueChange = viewModel::onPassword,
-        placeholder = "At least 8 characters",
-        leadingIcon = Icons.Default.Lock,
-        keyboardType = KeyboardType.Password,
-        isPassword = true,
-        error = state.passwordError
-    )
-    AppTextField(
-        label = "Confirm password",
-        value = state.confirm,
-        onValueChange = viewModel::onConfirm,
-        placeholder = "Type it again",
-        leadingIcon = Icons.Default.Lock,
-        keyboardType = KeyboardType.Password,
-        isPassword = true,
-        error = state.confirmError
-    )
-    PrimaryButton(text = "Continue", onClick = viewModel::continueToCompany)
-    TextAction(text = "Already registered? Sign in", color = AppColor.InfoInk, onClick = onSignIn)
-}
-
-@Composable
-private fun CompanyStep(
-    state: SupplierSignUpUiState,
-    viewModel: SupplierSignUpViewModel,
-    onSignedIn: (Profile) -> Unit
-) {
-    ScreenHeading(
-        eyebrow = "Step 2 of 2",
-        title = "Company profile",
-        subtitle = "An officer checks these details against CIPC, CSD and SARS records."
-    )
-    CompanyProfileFields(
-        form = state.company,
-        errors = state.companyErrors,
-        enabled = !state.submitting,
-        showMobile = false,
-        onChange = viewModel::onCompany
+        title = "Register for TenderTrack",
+        subtitle = "For companies already registered on the eTender portal"
     )
     NoteBanner(
-        title = "What happens next",
-        text = "A procurement officer reviews your registration and you will see the outcome when you sign in. " +
-            "Uploading compliance documents is not available in this version of the app yet.",
+        title = "Two registrations, for security",
+        text = "First register your company on the eTender portal. Then register here with the same email and " +
+            "password and the numbers from that registration. A 6-digit code is emailed to the company's " +
+            "contact address to prove it is you. Both registrations are needed to claim an award.",
         tone = NoteTone.Info,
-        icon = Icons.Default.Info
+        icon = Icons.Default.Shield
     )
+
+    val signedIn = state.signedInAs
+    if (signedIn != null) {
+        AppCard {
+            KeyValueRow("Signed in as", signedIn.email, showDivider = false)
+        }
+    } else {
+        AppTextField(
+            label = "Email address",
+            value = state.email,
+            onValueChange = viewModel::onEmail,
+            placeholder = "you@company.co.za",
+            leadingIcon = Icons.Default.MailOutline,
+            keyboardType = KeyboardType.Email,
+            hint = "The sign-in email of your eTender portal registration.",
+            error = state.errors["email"],
+            enabled = !state.submitting
+        )
+        AppTextField(
+            label = "Password",
+            value = state.password,
+            onValueChange = viewModel::onPassword,
+            placeholder = "Your eTender portal password",
+            leadingIcon = Icons.Default.Lock,
+            keyboardType = KeyboardType.Password,
+            isPassword = true,
+            error = state.errors["password"],
+            enabled = !state.submitting
+        )
+    }
+    AppTextField(
+        label = "CSD supplier number",
+        value = state.csdNumber,
+        onValueChange = viewModel::onCsd,
+        placeholder = "MAAA0451236",
+        leadingIcon = Icons.Default.Badge,
+        error = state.errors["csd"],
+        enabled = !state.submitting
+    )
+    AppTextField(
+        label = "Company registration number",
+        value = state.registrationNumber,
+        onValueChange = viewModel::onRegistrationNumber,
+        placeholder = "2019/451236/07",
+        leadingIcon = Icons.Default.Business,
+        error = state.errors["registration"],
+        enabled = !state.submitting
+    )
+
     state.formError?.let { NoteBanner(text = it, tone = NoteTone.Danger, icon = Icons.Default.Warning) }
+
     PrimaryButton(
-        text = "Create account",
-        icon = Icons.Default.Check,
+        text = "Send verification code",
+        icon = Icons.Default.MarkEmailRead,
         loading = state.submitting,
-        onClick = { viewModel.submit(onSignedIn) }
+        onClick = viewModel::sendCode
     )
-    SecondaryButton(text = "Back", enabled = !state.submitting, onClick = { viewModel.back() })
+    if (state.codePending) {
+        TextAction(text = "I already have a code", color = AppColor.InfoInk, onClick = viewModel::useExistingCode)
+    }
+    if (signedIn == null) {
+        TextAction(text = "Already registered for TenderTrack? Sign in", color = AppColor.InfoInk, onClick = onSignIn)
+    }
+    if (RegistrationRepository.instance is SampleRegistrationRepository) {
+        NoteBanner(
+            title = "Sample data",
+            text = "No Supabase project is configured. Sign in with any email starting with \"supplier\", and use " +
+                "CSD ${SampleRegistrationRepository.SAMPLE_CSD}, registration number " +
+                "${SampleRegistrationRepository.SAMPLE_REGISTRATION} and code ${SampleRegistrationRepository.SAMPLE_CODE}.",
+            tone = NoteTone.Neutral
+        )
+    }
 }
 
 @Composable
-private fun CheckEmailStep(email: String, onSignIn: () -> Unit) {
+private fun CodeStep(state: SupplierSignUpUiState, viewModel: SupplierSignUpViewModel) {
     ScreenHeading(
-        eyebrow = "Almost done",
-        title = "Confirm your email",
-        subtitle = "We sent a confirmation link to $email."
+        eyebrow = "Step 2 of 2",
+        title = "Enter the code",
+        subtitle = if (state.sentTo.isNotBlank()) "Sent to ${state.sentTo}" else "Sent to the company's contact email"
     )
-    AppCard {
-        Text(
-            "Open the email and tap the link, then come back and sign in. Your registration has been " +
-                "received and is already waiting for an officer.",
-            style = AppType.Body
-        )
-        Spacer(Modifier.height(10.dp))
-        Text("No email after a few minutes? Check your spam folder.", style = AppType.Meta)
-    }
-    PrimaryButton(text = "Go to sign in", icon = Icons.Default.Lock, onClick = onSignIn)
+    Text(
+        "Open the email \"Your TenderTrack verification code\" from the eTender portal (or the portal's Demo " +
+            "mailbox) and type the 6 digits. The code works for 15 minutes.",
+        style = AppType.Body.copy(color = AppColor.InkSoft)
+    )
+    state.notice?.let { NoteBanner(text = it, tone = NoteTone.Success, icon = Icons.Default.CheckCircle) }
+    AppTextField(
+        label = "Verification code",
+        value = state.code,
+        onValueChange = viewModel::onCode,
+        placeholder = "6 digits",
+        leadingIcon = Icons.Default.Key,
+        keyboardType = KeyboardType.NumberPassword,
+        hint = if (state.code.isEmpty()) null else "${state.code.length} of 6 digits",
+        error = state.codeError,
+        enabled = !state.submitting && !state.needNewCode
+    )
+    PrimaryButton(
+        text = "Finish registering",
+        icon = Icons.Default.Check,
+        loading = state.submitting,
+        enabled = state.code.length == RegistrationInput.CODE_LENGTH && !state.needNewCode,
+        onClick = viewModel::verify
+    )
+    SecondaryButton(
+        text = "Send a new code",
+        icon = Icons.Default.Refresh,
+        enabled = !state.submitting,
+        onClick = viewModel::resend
+    )
+    TextAction(text = "Change the numbers", color = AppColor.InfoInk, onClick = { viewModel.back() })
+    Spacer(Modifier.height(Dimens.SpaceSm))
+}
+
+@Composable
+private fun DoneStep(state: SupplierSignUpUiState, onContinue: () -> Unit) {
+    ScreenHeading(
+        eyebrow = "Registered",
+        title = "Welcome to TenderTrack",
+        subtitle = state.signedInAs?.fullName
+    )
+    NoteBanner(
+        title = "Registration complete",
+        text = state.doneMessage.ifBlank { "Your company is registered for TenderTrack." },
+        tone = NoteTone.Success,
+        icon = Icons.Default.CheckCircle
+    )
+    Text(
+        "Your company is now registered on the eTender portal and in TenderTrack. Follow tenders here, and if " +
+            "you are awarded one, claim it under Awards with the code you are emailed. A procurement officer " +
+            "still verifies your company's details.",
+        style = AppType.Body.copy(color = AppColor.InkSoft)
+    )
+    PrimaryButton(text = "Continue to TenderTrack", icon = Icons.AutoMirrored.Filled.ArrowForward, onClick = onContinue)
 }

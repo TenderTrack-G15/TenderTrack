@@ -44,7 +44,7 @@ fun NavGraphBuilder.accountGraph(
         )
     }
 
-    // Suppliers sign in here; registering is a link on this page.
+    // Suppliers sign in here; "Register an account" opens the TenderTrack registration.
     composable(AccountRoutes.SUPPLIER_SIGN_IN) {
         SignInScreen(
             audience = SignInAudience.SUPPLIER,
@@ -64,7 +64,6 @@ fun NavGraphBuilder.accountGraph(
     composable(AccountRoutes.SUPPLIER_SIGN_UP) {
         SupplierSignUpScreen(
             onBack = { navController.popBackStack() },
-            // Back to the supplier sign-in page this was opened from.
             onSignIn = {
                 navController.navigate(AccountRoutes.SUPPLIER_SIGN_IN) {
                     popUpTo(AccountRoutes.SUPPLIER_SIGN_UP) { inclusive = true }

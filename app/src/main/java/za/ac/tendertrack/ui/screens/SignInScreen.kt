@@ -207,14 +207,8 @@ fun SignInScreen(
             onClick = { viewModel.signIn(onSignedIn) }
         )
 
-        Row(
-            Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            TextAction(text = "Forgot password?", color = AppColor.InfoInk, onClick = onForgotPassword)
-            onRegister?.let { TextAction(text = "Register an account", color = AppColor.InfoInk, onClick = it) }
-        }
+        TextAction(text = "Forgot password?", color = AppColor.InfoInk, onClick = onForgotPassword)
+        onRegister?.let { TextAction(text = "Register an account", color = AppColor.InfoInk, onClick = it) }
         TextAction(text = audience.switchLabel, color = AppColor.Muted, onClick = onSwitchAudience)
 
         NoteBanner(
