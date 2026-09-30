@@ -53,7 +53,7 @@ async function render() {
     h('section', { class: 'section' },
       h('h2', { class: 'h2' }, 'How to take part'),
       h('div', { class: 'steps mt' },
-        step(1, 'Register your company', 'Company, contact, compliance, banking, capabilities and documents — once.'),
+        step(1, 'Register your company', 'Here first: company, contact, compliance, banking, capabilities and documents. Then register for the TenderTrack app too.'),
         step(2, 'Find a tender', 'Search here, or in the TenderTrack app. Download the documents and read the requirements.'),
         step(3, 'Submit your bid', 'Enter your price, confirm the required documents and submit before the closing date.'),
         step(4, 'Claim the award', 'If you win, you are emailed a one-time code. Enter it in TenderTrack to claim the contract.')),

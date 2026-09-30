@@ -32,8 +32,9 @@ async function render() {
 
   let bids;
   let awards;
+  let status;
   try {
-    [bids, awards] = await Promise.all([rpc('supplier_bids'), rpc('supplier_awards')]);
+    [bids, awards, status] = await Promise.all([rpc('supplier_bids'), rpc('supplier_awards'), rpc('tendertrack_registration_status')]);
   } catch (e) {
     showError(main, e.message, render);
     return;
@@ -64,7 +65,14 @@ async function render() {
       h('div', { class: 'card' },
         h('div', { class: 'card-head' }, h('p', { class: 'h2' }, 'Registration'), badge(regLabel, regTone)),
         kv('CSD number', s.csd_number), kv('Registration number', s.registration_number),
-        kv('Contact email', s.contact_email), kv('Documents provided', `${s.documents_received} of ${s.documents_required}`),
+        kv('Contact email', s.contact_email), kv('Documents provided', `${s.documents_received} (${s.documents_required} required)`),
+        kv('eTender portal', s.portal_registered_at ? `Registered ${date(s.portal_registered_at)}` : 'Not complete'),
+        kv('TenderTrack app', s.app_registered_at ? `Registered ${date(s.app_registered_at)}` : 'Not registered yet'),
+        !s.portal_registered_at ? h('div', { class: 'mt' }, note('warn', 'Finish your eTender registration',
+          `Your company's registration on this portal is not complete, so you cannot bid or register for TenderTrack yet. Still needed: ${(status.portal_missing || []).join('; ') || 'see the registration'}.`),
+          h('a', { class: 'btn btn-primary btn-sm mt', href: '/register' }, 'Finish registration')) : null,
+        s.app_registered_at || !s.portal_registered_at ? null : h('div', { class: 'mt' }, note('warn', 'Register for TenderTrack as well',
+          `Awards are claimed in the TenderTrack app. Open Supplier login → Register an account, and use this email and password, CSD ${s.csd_number} and registration number ${s.registration_number}.`)),
         s.status === 'not_approved' ? h('div', { class: 'mt' }, note('danger', 'Not approved', s.decision_reason || 'Correct your details and resubmit in the TenderTrack app.')) : null,
         s.status === 'awaiting_verification' ? h('p', { class: 'hint mt' }, 'A procurement officer verifies registrations in TenderTrack. You can bid meanwhile; awards need a verified registration.') : null,
         h('p', { class: 'hint mt' }, 'To change your company details, banking or documents, use My company in the TenderTrack app.')),

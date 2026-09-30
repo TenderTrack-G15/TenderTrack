@@ -139,7 +139,7 @@ fun SupplierHomeScreen(
             is UiState.Loading -> LoadingState(message = "Loading tenders…")
             is UiState.Error -> ErrorState(result.message, onRetry = viewModel::load)
             is UiState.Success -> if (result.data.mustRegister) {
-                RegisterFirst(result.data, supplierName, onRegister)
+                RegisterFirst(result.data, supplierName, onRegister, onCheckAgain = viewModel::load)
             } else {
                 val home = result.data
                 ScreenHeading(
@@ -251,7 +251,7 @@ fun SupplierHomeScreen(
  * portal but has not registered for TenderTrack yet.
  */
 @Composable
-private fun RegisterFirst(home: SupplierHome, supplierName: String, onRegister: () -> Unit) {
+private fun RegisterFirst(home: SupplierHome, supplierName: String, onRegister: () -> Unit, onCheckAgain: () -> Unit) {
     ScreenHeading(
         eyebrow = "Supplier",
         title = home.registration?.companyName?.ifBlank { null } ?: home.profile?.companyName ?: "Welcome",
@@ -259,14 +259,16 @@ private fun RegisterFirst(home: SupplierHome, supplierName: String, onRegister: 
     )
     if (home.registration?.portalRegistered == false) {
         // The company's own step on the portal comes first; no one else has to do anything.
+        val missing = home.registration?.portalMissing.orEmpty()
         NoteBanner(
             title = "Finish your eTender registration first",
-            text = "Your company's registration on the eTender portal is not complete. Sign in on the portal " +
-                "with this email and password: it opens the registration so you can check your details, add " +
-                "anything missing and submit. Then come back here to register for TenderTrack.",
+            text = "Your company's registration on the eTender portal is not complete" +
+                (if (missing.isNotEmpty()) ". Still needed: ${missing.joinToString("; ")}" else "") +
+                ". Sign in on the eTender portal with this email and password to add it, then tap Check again.",
             tone = NoteTone.Warning,
             icon = Icons.Default.Shield
         )
+        SecondaryButton(text = "Check again", icon = Icons.Default.Refresh, onClick = onCheckAgain)
         return
     }
     NoteBanner(

@@ -2,8 +2,9 @@
  * Supplier registration — company, contact, compliance, banking, business
  * capabilities and supporting documents, then the account.
  *
- * TenderTrack has no registration of its own: a company registers here once,
- * then uses the same email and password in the TenderTrack app. The new
+ * A company registers here first (the government's record), then registers
+ * for TenderTrack in the app with the same account, its CSD and registration
+ * numbers and a 6-digit code emailed to its contact address. The new
  * registration starts as "awaiting verification"; a procurement officer
  * verifies it in TenderTrack.
  */
@@ -92,7 +93,7 @@ const STEPS = [
     { key: 'company_profile', label: 'Company profile', type: 'textarea', full: true, placeholder: 'A short description of the company, its history and major clients.' },
   ] },
   { id: 'documents', title: 'Supporting documents', intro: 'For each document, record its reference number and, if it expires, the expiry date. Files are not uploaded in this demo: add a link if the document is online.' },
-  { id: 'account', title: 'Account and declaration', intro: 'You sign in to this portal and to the TenderTrack app with this email and password.', fields: [
+  { id: 'account', title: 'Account and declaration', intro: 'You sign in to this portal with this email and password, and use the same ones to register for the TenderTrack app afterwards.', fields: [
     { key: 'email', label: 'Sign-in email address', required: true, rx: 'email', type: 'email', autocomplete: 'username' },
     { key: 'password', label: 'Password', required: true, type: 'password', autocomplete: 'new-password', hint: 'At least 8 characters, with letters and numbers.' },
     { key: 'password2', label: 'Confirm password', required: true, type: 'password', autocomplete: 'new-password' },
@@ -101,19 +102,37 @@ const STEPS = [
   { id: 'review', title: 'Review and submit' },
 ];
 
+/** Makes sure a saved value can be shown in a select or tick list, even if it is not one of the usual options. */
+function ensureOption(key, value) {
+  if (value === undefined || value === null || value === '') return;
+  for (const step of STEPS) {
+    const f = (step.fields || []).find((x) => x.key === key);
+    if (f && !f.options.some((o) => (Array.isArray(o) ? o[0] : o) === value)) f.options.push(value);
+  }
+}
+
+const listOf = (text) => String(text || '').split(/\s*[,;]\s*/).map((x) => x.trim()).filter(Boolean);
+
 async function render() {
   const { who, main } = await chrome('register');
-  if (who && who.profile) {
-    clear(main).appendChild(h('div', { class: 'card' },
+  // A signed-in company whose portal registration is not complete (for example
+  // one that signed up in the TenderTrack app) finishes it here, on its own.
+  const finishing = Boolean(who && who.supplier && !who.supplier.portal_registered_at);
+  if (who && who.profile && !finishing) {
+    fill(main, h('div', { class: 'card' },
       h('p', { class: 'h2' }, 'You are already signed in'),
-      h('p', { class: 'meta mt' }, `Signed in as ${who.profile.full_name}. Sign out first to register another company.`),
-      h('a', { class: 'btn btn-secondary mt', href: '/account' }, 'Go to my account')));
+      h('p', { class: 'meta mt' }, who.supplier
+        ? `${who.supplier.company_name} is registered on this portal. To register another company, sign out first.`
+        : `Signed in as ${who.profile.full_name}. Sign out first to register a company.`),
+      h('a', { class: 'btn btn-secondary mt', href: who.supplier ? '/account' : '/' }, who.supplier ? 'Go to my account' : 'Back to the home page')));
     return;
   }
 
   const data = { business_type: '', province: '', tax_clearance_status: 'valid', bbbee_level: '', bank_name: '', industry: INDUSTRIES[0], categories: [], geographic_areas: [], declaration: false };
   const docs = Object.fromEntries(DOCUMENTS.map(([name]) => [name, { provided: false, reference: '', expires: '', link: '' }]));
+  if (finishing) await prefill(who, data, docs);
   let current = 0;
+  let loginCreated = false;
   const errors = {};
 
   const stepsList = h('ol', { class: 'wizard-steps' });
@@ -142,15 +161,23 @@ async function render() {
       if (required && !d.provided) { d.error = 'This document is required.'; ok = false; }
       else if (d.provided && d.reference.trim().length < 2) { d.error = 'Enter the document reference or number.'; ok = false; }
       else if (d.link && !RX.url[0].test(d.link.trim())) { d.error = RX.url[1]; ok = false; }
+      else if (d.provided && d.expires && d.expires < new Date().toISOString().slice(0, 10)) {
+        d.error = 'This document has expired. Enter the new document\'s reference and expiry date.'; ok = false;
+      }
     }
     return ok;
+  }
+
+  /** The fields a step shows. When finishing, the company already has its login. */
+  function fieldsOf(step) {
+    return (step.fields || []).filter((f) => !finishing || !['email', 'password', 'password2'].includes(f.key));
   }
 
   function validateStep(i) {
     const step = STEPS[i];
     if (step.id === 'documents') return validateDocs();
     let ok = true;
-    for (const f of step.fields || []) {
+    for (const f of fieldsOf(step)) {
       errors[f.key] = validateField(f);
       if (errors[f.key]) ok = false;
     }
@@ -184,6 +211,7 @@ async function render() {
     }
     return h('input', {
       class: f.upper ? 'input upper' : 'input', ...common, type: f.type || 'text', placeholder: f.placeholder || '', value: data[f.key] ?? '',
+      readonly: finishing && f.key === 'csd_number',
       autocomplete: f.autocomplete || 'off', inputmode: f.inputmode || null, min: f.min != null ? String(f.min) : null, max: f.max != null ? String(f.max) : null,
       oninput: (e) => set(f.upper ? e.target.value.toUpperCase() : e.target.value),
     });
@@ -236,7 +264,7 @@ async function render() {
     const rows = [];
     for (const step of STEPS) {
       if (!step.fields) continue;
-      const items = step.fields.filter((f) => !['password', 'password2', 'declaration'].includes(f.key)).map((f) => {
+      const items = fieldsOf(step).filter((f) => !['password', 'password2', 'declaration'].includes(f.key)).map((f) => {
         let v = data[f.key];
         if (Array.isArray(v)) v = v.join(', ');
         if (f.key === 'account_number' && v) v = `•••• ${String(v).slice(-4)}`;
@@ -259,7 +287,11 @@ async function render() {
     let body;
     if (step.id === 'documents') body = documentsPanel();
     else if (step.id === 'review') body = [note('info', 'Check everything before you submit', 'Your registration starts as "awaiting verification". A procurement officer verifies it in TenderTrack. You can bid straight away, but a tender can only be awarded to a verified supplier.'), h('div', { class: 'mt' }, reviewPanel())];
-    else body = h('div', { class: 'form-grid' }, step.fields.map(fieldBlock));
+    else body = h('div', { class: 'form-grid' },
+      finishing && step.id === 'account'
+        ? h('div', { class: 'field full' }, h('div', { class: 'kv' }, h('span', { class: 'kv-key' }, 'Signed in as'), h('span', { class: 'kv-value' }, who.profile.email)))
+        : null,
+      fieldsOf(step).map(fieldBlock));
 
     fill(panel, h('form', {
       novalidate: true,
@@ -281,7 +313,8 @@ async function render() {
     },
     h('p', { class: 'eyebrow' }, `Step ${current + 1} of ${STEPS.length}`),
     h('h2', { class: 'h2' }, step.title),
-    step.intro ? h('p', { class: 'meta mt-sm mb' }, step.intro) : h('div', { class: 'mb' }),
+    step.intro ? h('p', { class: 'meta mt-sm mb' }, finishing && step.id === 'account'
+      ? 'You are already signed in, so no new login is needed. Accept the declaration to finish.' : step.intro) : h('div', { class: 'mb' }),
     step.id === 'banking' ? h('div', { class: 'mb' }, note('warn', 'Demonstration system', 'Do not enter real banking details. Use made-up numbers in the right format, for example account 1234567890 and branch code 250655.')) : null,
     body,
     h('div', { class: 'wizard-actions' }, back, next)));
@@ -296,69 +329,87 @@ async function render() {
     await busy(button, async () => {
       fill(panel, h('h2', { class: 'h2' }, 'Submitting your registration…'), progress);
       try {
-        say('Creating your account…');
-        await api('POST', '/api/register', {
-          email: data.email.trim(), password: data.password,
-          company: {
-            company_name: data.company_name, registration_number: data.registration_number, csd_number: data.csd_number,
-            business_type: data.business_type, tax_number: data.tax_number, contact_person: data.contact_person,
-            job_title: data.job_title, mobile_number: data.mobile_number, province: data.province, bbbee_level: data.bbbee_level,
-          },
-        });
-        const { error } = await sb.auth.signInWithPassword({ email: data.email.trim(), password: data.password });
-        if (error) throw new Error(messageOf(error));
-        say('Saving the company profile…');
-        await rpc('save_supplier_profile', {
-          p_company_name: data.company_name, p_registration_number: data.registration_number, p_tax_number: data.tax_number,
-          p_vat_number: data.vat_number || '', p_business_type: data.business_type,
-          p_year_established: data.year_established ? Number(data.year_established) : null,
-          p_contact_person: data.contact_person, p_job_title: data.job_title, p_contact_email: data.contact_email,
-          p_phone_number: data.phone_number || '', p_mobile_number: data.mobile_number,
-          p_physical_address: data.physical_address, p_postal_address: data.postal_address || data.physical_address,
-          p_province: data.province, p_industry_licences: data.industry_licences || '',
-          p_professional_registrations: data.professional_registrations || '',
-          p_categories: data.categories.join(', '), p_industry: data.industry, p_expertise: data.expertise || '',
-          p_geographic_areas: data.geographic_areas.join(', '), p_company_profile: data.company_profile || '',
-          p_employees: data.employees !== undefined && data.employees !== '' ? Number(data.employees) : null,
-        });
-        say('Saving compliance details…');
-        await rpc('save_supplier_compliance', {
-          p_tax_clearance_status: data.tax_clearance_status, p_tax_clearance_expiry: data.tax_clearance_expiry || null,
-          p_bbbee_level: data.bbbee_level ? Number(data.bbbee_level) : null, p_bbbee_expiry: data.bbbee_expiry || null,
-        });
-        say('Saving banking details (confidential)…');
-        await rpc('save_supplier_banking', {
-          p_bank_name: data.bank_name, p_account_name: data.account_name, p_account_number: data.account_number.trim(),
-          p_branch_code: data.branch_code.trim(), p_proof_url: data.proof_url || null,
-        });
-        say('Recording supporting documents…');
-        for (const [name] of DOCUMENTS) {
-          const d = docs[name];
-          if (!d.provided) continue;
-          await rpc('save_supplier_document', { p_name: name, p_reference: d.reference.trim(), p_expires_at: d.expires || null, p_file_url: d.link.trim() || null });
+        if (!finishing && !loginCreated) {
+          await createLogin();
+          loginCreated = true; // a second try after an error only saves the details again
         }
+        await saveDetails();
+        say('Recording your registration on the portal…');
+        await api('POST', '/api/register/complete', {}, true);
         done();
       } catch (e) {
         fill(panel,
           note('danger', 'The registration did not finish', e.message),
-          h('p', { class: 'meta mt' }, 'If the message says the account was created, sign in and complete your details in the TenderTrack app under My company.'),
+          h('p', { class: 'meta mt' }, finishing
+            ? 'Nothing you entered is lost: go back, correct it, and submit again.'
+            : 'If your account was created, sign in: this page then lets you finish the registration.'),
           h('div', { class: 'wizard-actions' },
             h('button', { class: 'btn btn-secondary', type: 'button', onclick: () => { current = STEPS.length - 1; drawPanel(); } }, 'Back to the review'),
-            h('a', { class: 'btn btn-primary', href: '/signin' }, 'Sign in')));
+            finishing ? null : h('a', { class: 'btn btn-primary', href: '/signin' }, 'Sign in')));
       }
     });
+
+    async function createLogin() {
+      say('Creating your account…');
+      await api('POST', '/api/register', {
+        email: data.email.trim(), password: data.password,
+        company: {
+          company_name: data.company_name, registration_number: data.registration_number, csd_number: data.csd_number,
+          business_type: data.business_type, tax_number: data.tax_number, contact_person: data.contact_person,
+          job_title: data.job_title, mobile_number: data.mobile_number, province: data.province, bbbee_level: data.bbbee_level,
+        },
+      });
+      const { error } = await sb.auth.signInWithPassword({ email: data.email.trim(), password: data.password });
+      if (error) throw new Error(messageOf(error));
+    }
+
+    async function saveDetails() {
+      say('Saving the company profile…');
+      await rpc('save_supplier_profile', {
+        p_company_name: data.company_name, p_registration_number: data.registration_number, p_tax_number: data.tax_number,
+        p_vat_number: data.vat_number || '', p_business_type: data.business_type,
+        p_year_established: data.year_established ? Number(data.year_established) : null,
+        p_contact_person: data.contact_person, p_job_title: data.job_title, p_contact_email: data.contact_email,
+        p_phone_number: data.phone_number || '', p_mobile_number: data.mobile_number,
+        p_physical_address: data.physical_address, p_postal_address: data.postal_address || data.physical_address,
+        p_province: data.province, p_industry_licences: data.industry_licences || '',
+        p_professional_registrations: data.professional_registrations || '',
+        p_categories: data.categories.join(', '), p_industry: data.industry, p_expertise: data.expertise || '',
+        p_geographic_areas: data.geographic_areas.join(', '), p_company_profile: data.company_profile || '',
+        p_employees: data.employees !== undefined && data.employees !== '' ? Number(data.employees) : null,
+      });
+      say('Saving compliance details…');
+      await rpc('save_supplier_compliance', {
+        p_tax_clearance_status: data.tax_clearance_status, p_tax_clearance_expiry: data.tax_clearance_expiry || null,
+        p_bbbee_level: data.bbbee_level ? Number(data.bbbee_level) : null, p_bbbee_expiry: data.bbbee_expiry || null,
+      });
+      say('Saving banking details (confidential)…');
+      await rpc('save_supplier_banking', {
+        p_bank_name: data.bank_name, p_account_name: data.account_name, p_account_number: String(data.account_number).trim(),
+        p_branch_code: String(data.branch_code).trim(), p_proof_url: data.proof_url || null,
+      });
+      say('Recording supporting documents…');
+      for (const [name] of DOCUMENTS) {
+        const d = docs[name];
+        if (!d.provided) continue;
+        await rpc('save_supplier_document', { p_name: name, p_reference: d.reference.trim(), p_expires_at: d.expires || null, p_file_url: d.link.trim() || null });
+      }
+    }
   }
 
   function done() {
     stepsList.hidden = true;
+    panel.parentElement.classList.add('done'); // one column once the steps list is gone
     fill(panel,
       h('div', { class: 'note note-success' }, icon('success'), h('div', {},
-        h('p', { class: 'note-title' }, 'Registration submitted'),
-        h('p', {}, `${data.company_name} (${data.csd_number}) is registered and awaiting verification.`))),
+        h('p', { class: 'note-title' }, finishing ? 'Registration complete' : 'Registration submitted'),
+        h('p', {}, finishing
+          ? `${data.company_name} (${data.csd_number}) is now registered on the eTender portal.`
+          : `${data.company_name} (${data.csd_number}) is registered and awaiting verification.`))),
       h('h2', { class: 'h2 mt' }, 'What happens next'),
       h('ol', { class: 'bullets' },
         h('li', {}, 'A procurement officer checks your details and documents in TenderTrack and verifies your registration.'),
-        h('li', {}, `Sign in to the TenderTrack app (Supplier Login) with ${data.email.trim()} and your password, to follow tenders and your registration.`),
+        h('li', {}, `Register for TenderTrack too: in the app, open Supplier login → Register an account, and enter ${(finishing ? who.profile.email : data.email).trim()}, your password, CSD number ${data.csd_number} and registration number ${data.registration_number}. A 6-digit code is emailed to ${data.contact_email} to confirm it. Both registrations are needed to claim an award.`),
         h('li', {}, 'Bid for tenders on this portal. A tender can only be awarded to a verified supplier.'),
         h('li', {}, `If you are awarded a tender, a 10-digit award code is emailed to ${data.contact_email}. Enter it in TenderTrack to claim the contract.`)),
       h('div', { class: 'row mt' }, h('a', { class: 'btn btn-primary', href: '/tenders' }, 'Find a tender'), h('a', { class: 'btn btn-secondary', href: '/account' }, 'My bids & awards')));
@@ -368,10 +419,55 @@ async function render() {
   fill(main,
     h('div', { class: 'page-head' }, h('div', {},
       h('p', { class: 'eyebrow' }, 'Suppliers'),
-      h('h1', { class: 'h1' }, 'Supplier registration'),
-      h('p', { class: 'meta' }, 'Register your company once to bid for tenders. The same account signs you in to the TenderTrack app.'))),
+      h('h1', { class: 'h1' }, finishing ? 'Finish your eTender registration' : 'Supplier registration'),
+      h('p', { class: 'meta' }, finishing
+        ? `${who.supplier.company_name} has an account, but its registration on this portal is not complete. Check the details below, add anything missing and submit. This is needed before bidding or registering for TenderTrack.`
+        : 'Register your company here to bid for tenders. Then register for the TenderTrack app with the same account: awards are claimed there.'))),
     h('div', { class: 'wizard' }, stepsList, panel));
   drawPanel();
+}
+
+/** Fills the form with what is already on record for a company finishing its registration. */
+async function prefill(who, data, docs) {
+  const s = who.supplier;
+  const text = (v) => (v === null || v === undefined ? '' : String(v));
+  const statusOk = ['valid', 'pending', 'not_submitted'].includes(s.tax_clearance_status);
+  Object.assign(data, {
+    company_name: text(s.company_name), registration_number: text(s.registration_number), csd_number: text(s.csd_number),
+    tax_number: text(s.tax_number), vat_number: text(s.vat_number), business_type: text(s.business_type),
+    year_established: text(s.year_established), contact_person: text(s.contact_person), job_title: text(s.job_title),
+    contact_email: text(s.contact_email) || who.profile.email, phone_number: text(s.phone_number),
+    mobile_number: text(s.mobile_number), province: text(s.province), physical_address: text(s.physical_address),
+    postal_address: text(s.postal_address), tax_clearance_status: statusOk ? s.tax_clearance_status : 'not_submitted',
+    tax_clearance_expiry: text(s.tax_clearance_expiry), bbbee_level: s.bbbee_level ? String(s.bbbee_level) : '',
+    bbbee_expiry: text(s.bbbee_expiry), industry_licences: text(s.industry_licences),
+    professional_registrations: text(s.professional_registrations), categories: listOf(s.categories),
+    industry: text(s.industry) || INDUSTRIES[0], employees: text(s.employees), expertise: text(s.expertise),
+    geographic_areas: listOf(s.geographic_areas), company_profile: text(s.company_profile), email: who.profile.email,
+  });
+  ensureOption('business_type', data.business_type);
+  ensureOption('province', data.province);
+  ensureOption('industry', data.industry);
+  data.categories.forEach((c) => ensureOption('categories', c));
+  data.geographic_areas.forEach((c) => ensureOption('geographic_areas', c));
+
+  // The company's own banking details and documents (row-level security shows it only its own).
+  const { data: bank } = await sb.from('supplier_banking')
+    .select('bank_name, account_name, account_number, branch_code, proof_url').eq('supplier_id', s.id).maybeSingle();
+  if (bank) {
+    Object.assign(data, { bank_name: text(bank.bank_name), account_name: text(bank.account_name),
+      account_number: text(bank.account_number), branch_code: text(bank.branch_code), proof_url: text(bank.proof_url) });
+    ensureOption('bank_name', data.bank_name);
+  }
+  const { data: saved } = await sb.from('supplier_documents')
+    .select('name, status, reference, expires_at, file_url').eq('supplier_id', s.id);
+  for (const d of saved || []) {
+    if (!docs[d.name]) continue;
+    docs[d.name] = {
+      provided: ['submitted', 'verified', 'expired'].includes(d.status) && Boolean(String(d.reference || '').trim()),
+      reference: text(d.reference), expires: text(d.expires_at), link: text(d.file_url),
+    };
+  }
 }
 
 render();

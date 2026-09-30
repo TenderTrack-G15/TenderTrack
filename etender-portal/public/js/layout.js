@@ -3,7 +3,7 @@
  * who is signed in. Each page calls chrome('page-id') first.
  */
 
-import { whoAmI, signOut } from './client.js';
+import { whoAmI, signOut, PORTAL_VERSION } from './client.js';
 import { h, clear, icon, loading, errorBox, fill, put } from './ui.js';
 
 const LOGO_PATH = 'M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zm-3.06 16L7.4 14.46l1.41-1.41 2.12 2.12 4.24-4.24 1.41 1.41L10.94 18zM13 9V3.5L18.5 9H13z';
@@ -77,7 +77,8 @@ export async function chrome(page) {
       h('div', {}, 'A demonstration system built for the TenderTrack student project. It is not a government website and is not linked to any government system.')),
     h('div', {},
       h('div', {}, 'Suppliers find tenders in TenderTrack and bid here.'),
-      h('div', {}, 'Awarded companies claim their contract in the TenderTrack app with the code they are emailed.'))));
+      h('div', {}, 'Awarded companies claim their contract in the TenderTrack app with the code they are emailed.'),
+      h('div', { class: 'footer-version' }, `Portal version ${PORTAL_VERSION}`))));
 
   const main = clear(document.getElementById('main'));
   main.appendChild(loading());

@@ -63,7 +63,8 @@ async function render() {
           show('warn', 'No company registration', 'This account has no company registration linked to it. Register your company first.');
           return;
         }
-        const to = destination(role);
+        // A company whose portal registration is not complete finishes it first.
+        const to = me.supplier && !me.supplier.portal_registered_at ? '/register' : destination(role);
         if (!to) {
           await sb.auth.signOut();
           show('warn', 'Not for this portal', 'This portal is for registered suppliers and procurement officers. '
@@ -88,7 +89,7 @@ async function render() {
         note('info', 'One account for the portal and TenderTrack', 'Use the email address and password you use in the TenderTrack app. The portal and the app share the same database.'),
         h('div', { class: 'card' },
           h('p', { class: 'h3' }, 'New supplier?'),
-          h('p', { class: 'meta mt' }, 'Register your company once: company, contact, compliance, banking, capabilities and documents. Then sign in here to bid, and in TenderTrack to follow tenders and claim awards.'),
+          h('p', { class: 'meta mt' }, 'Register your company here: company, contact, compliance, banking, capabilities and documents. Then register for the TenderTrack app as well, to follow tenders and claim awards.'),
           h('a', { class: 'btn btn-primary mt', href: '/register' }, icon('business'), 'Register as a supplier')))));
   email.input.focus();
 }
