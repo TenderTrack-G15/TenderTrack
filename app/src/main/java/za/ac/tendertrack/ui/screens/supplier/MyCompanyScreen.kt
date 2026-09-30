@@ -89,6 +89,8 @@ fun MyCompanyScreen(
     onEditProfile: () -> Unit,
     onOpenBanking: () -> Unit,
     onOpenDocuments: () -> Unit,
+    /** Opens the supplier's navigation panel; shown instead of Back when given. */
+    onMenu: (() -> Unit)? = null,
     viewModel: MyCompanyViewModel = viewModel()
 ) {
     val state by viewModel.state.collectAsState()
@@ -105,7 +107,7 @@ fun MyCompanyScreen(
         }
     }
 
-    AppScaffold(title = "My Company", onBack = onBack, snackbarHostState = snackbar) {
+    AppScaffold(title = "My Company", onBack = onBack, onMenu = onMenu, snackbarHostState = snackbar) {
         when (val result = state.view) {
             is UiState.Loading -> LoadingState(message = "Loading your registration…")
             is UiState.Error -> ErrorState(result.message, onRetry = viewModel::load)

@@ -57,6 +57,8 @@ fun MyAwardsScreen(
     onBack: () -> Unit,
     onClaim: (String) -> Unit,
     onOpenContract: (String) -> Unit,
+    /** Opens the supplier's navigation panel; shown instead of Back when given. */
+    onMenu: (() -> Unit)? = null,
     viewModel: MyAwardsViewModel = viewModel()
 ) {
     val state by viewModel.state.collectAsState()
@@ -64,7 +66,7 @@ fun MyAwardsScreen(
     // Reloads when the screen comes back into view, e.g. after claiming.
     LaunchedEffect(Unit) { viewModel.load() }
 
-    AppScaffold(title = "Awards", onBack = onBack) {
+    AppScaffold(title = "Awards", onBack = onBack, onMenu = onMenu) {
         when (val result = state) {
             is UiState.Loading -> LoadingState(message = "Loading your awards…")
             is UiState.Error -> ErrorState(result.message, onRetry = viewModel::load)
