@@ -20,7 +20,7 @@ async function render() {
       h('h2', { class: 'h2' }, 'From tender to contract'),
       h('div', { class: 'steps mt' },
         step(1, 'Tender published', 'Procurement officer · TenderTrack', 'The officer registers the tender and publishes it. It appears here and in TenderTrack at the same time.'),
-        step(2, 'Company registers', 'Supplier · this portal', 'Once only: company, contact, compliance, banking, capabilities and documents. The officer verifies it in TenderTrack.'),
+        step(2, 'Company registers twice', 'Supplier · this portal, then TenderTrack', 'First here: company, contact, compliance, banking, capabilities and documents. Then in the TenderTrack app, confirmed with a code sent to the company\'s email. The officer verifies the company in TenderTrack.'),
         step(3, 'Bid submitted', 'Supplier · this portal', 'Price, validity, preference points, required documents and a declaration, before the closing date.'),
         step(4, 'Bids evaluated', 'Procurement officer · this portal', 'After closing, the officer opens the bids, compares them and awards one.')),
       h('div', { class: 'steps mt' },
@@ -39,7 +39,7 @@ async function render() {
           h('li', {}, 'Until it is entered, the company cannot start the contract or update deliverables — the database enforces this.'))),
       h('div', { class: 'card' },
         h('p', { class: 'h3' }, 'One account, two places'),
-        h('p', { class: 'meta mt' }, 'Suppliers and officers use the same email and password on this portal and in the TenderTrack app. There is no separate registration in TenderTrack: companies register here.'),
+        h('p', { class: 'meta mt' }, 'A company registers here first, then registers for the TenderTrack app with the same email and password, its CSD and registration numbers, and a 6-digit code emailed to its contact address. Both are needed before an award can be claimed, so a stolen password alone is not enough.'),
         h('div', { class: 'row mt' }, h('a', { class: 'btn btn-primary', href: '/register' }, icon('business'), 'Register a company'), h('a', { class: 'btn btn-secondary', href: '/tenders' }, 'Browse tenders')))));
 }
 

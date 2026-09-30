@@ -20,7 +20,10 @@ data class TenderTrackRegistration(
     @SerialName("has_company") val hasCompany: Boolean = false,
     @SerialName("company_name") val companyName: String = "",
     @SerialName("csd_number") val csdNumber: String = "",
+    /** Worked out by the database from the company's records; nobody sets it by hand. */
     @SerialName("portal_registered") val portalRegistered: Boolean = false,
+    /** What the portal registration still lacks, e.g. "banking information". Empty when complete. */
+    @SerialName("portal_missing") val portalMissing: List<String> = emptyList(),
     @SerialName("app_registered") val appRegistered: Boolean = false,
     @SerialName("app_registered_at") val appRegisteredAt: String? = null,
     /** A code was sent and can still be used. */

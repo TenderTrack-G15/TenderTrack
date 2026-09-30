@@ -8,6 +8,8 @@ import { chrome, requireRole, showError } from '../layout.js';
 import { api } from '../client.js';
 import { h, clear, icon, note, dateTime, empty, fill } from '../ui.js';
 
+const KIND = { award_code: 'Award code', bid_receipt: 'Bid receipt', verification: 'TenderTrack code' };
+
 async function render() {
   const { who, main } = await chrome('mailbox');
   if (!requireRole(who, 'supplier', main)) return;
@@ -23,12 +25,13 @@ async function render() {
     return data;
   }
 
-  /** The body as text, with the award code picked out. Never inserted as HTML. */
-  function bodyWithCode(text) {
+  /** The body as text, with the code picked out. Never inserted as HTML. */
+  function bodyWithCode(text, kind) {
     const out = h('div', { class: 'mail-body' });
-    const parts = String(text).split(/(\b\d{5} \d{5}\b)/);
-    for (const part of parts) {
-      out.appendChild(/^\d{5} \d{5}$/.test(part) ? h('span', { class: 'code-highlight' }, part) : document.createTextNode(part));
+    const code = kind === 'verification' ? /(\b\d{6}\b)/ : /(\b\d{5} \d{5}\b)/;
+    const whole = kind === 'verification' ? /^\d{6}$/ : /^\d{5} \d{5}$/;
+    for (const part of String(text).split(code)) {
+      out.appendChild(whole.test(part) ? h('span', { class: 'code-highlight' }, part) : document.createTextNode(part));
     }
     return out;
   }
@@ -43,7 +46,7 @@ async function render() {
     if (!selected || !messages.some((m) => m.id === selected)) selected = messages[0].id;
     for (const m of messages) {
       list.appendChild(h('button', { class: `mail-item${m.id === selected ? ' active' : ''}`, type: 'button', onclick: () => { selected = m.id; draw(); } },
-        h('div', { class: 'spread' }, h('span', { class: 'primary' }, m.kind === 'award_code' ? 'Award code' : 'Bid receipt'), h('span', { class: 'secondary' }, dateTime(m.receivedAt))),
+        h('div', { class: 'spread' }, h('span', { class: 'primary' }, KIND[m.kind] || 'Email'), h('span', { class: 'secondary' }, dateTime(m.receivedAt))),
         h('div', { class: 'meta' }, m.subject),
         h('div', { class: 'secondary' }, `To: ${m.to}`)));
     }
@@ -52,9 +55,11 @@ async function render() {
       h('p', { class: 'eyebrow' }, dateTime(m.receivedAt)),
       h('h2', { class: 'h2' }, m.subject),
       h('p', { class: 'meta mb' }, `From: eTender Demo Portal · To: ${m.toName ? `${m.toName} ` : ''}<${m.to}>`),
-      bodyWithCode(m.body),
+      bodyWithCode(m.body, m.kind),
       m.kind === 'award_code' ? h('div', { class: 'mt' }, note('info', 'Next step',
-        'Open the TenderTrack app, sign in with your supplier account, go to Awards, choose this tender and enter the 10-digit code.')) : null);
+        'Open the TenderTrack app, sign in with your supplier account, go to Awards, choose this tender and enter the 10-digit code.')) : null,
+      m.kind === 'verification' ? h('div', { class: 'mt' }, note('info', 'Next step',
+        'Type this 6-digit code in the TenderTrack app to finish registering. It expires 15 minutes after it was sent.')) : null);
   }
 
   let data;

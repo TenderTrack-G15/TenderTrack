@@ -22,6 +22,7 @@ export const sb = window.supabase.createClient(config.supabaseUrl, config.anonKe
 });
 
 export const REAL_EMAIL = Boolean(config.realEmail);
+export const PORTAL_VERSION = String(config.version || 'unknown');
 
 export function messageOf(error) {
   if (!error) return 'Something went wrong. Please try again.';
@@ -87,6 +88,8 @@ export async function whoAmI() {
     .select('id, email, full_name, role, department, suspended').eq('id', session.user.id).maybeSingle();
   let supplier = null;
   if (profile && profile.role === 'supplier') {
+    // Lets the database bring the company's registration status up to date first.
+    await sb.rpc('tendertrack_registration_status').then(() => null, () => null);
     const { data } = await sb.from('suppliers').select('*').eq('owner_id', session.user.id).maybeSingle();
     supplier = data || null;
   }

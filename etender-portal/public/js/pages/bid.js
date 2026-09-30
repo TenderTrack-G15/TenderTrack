@@ -46,6 +46,12 @@ async function render() {
     fill(main, header, note('info', `Your bid is ${existing.status}`, 'It can no longer be changed.'));
     return;
   }
+  if (!supplier.portal_registered_at) {
+    fill(main, header, note('warn', 'Finish your eTender registration first',
+      'Your company\'s registration on this portal is not complete. Finish it, then come back to bid.'),
+      h('a', { class: 'btn btn-primary mt', href: '/register' }, 'Finish registration'));
+    return;
+  }
   if (supplier.status === 'not_approved') {
     fill(main, header, note('danger', 'Registration not approved',
       `${supplier.decision_reason || 'Correct your registration'} — then resubmit it in the TenderTrack app (My company) before bidding.`));
