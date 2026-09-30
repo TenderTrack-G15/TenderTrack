@@ -63,7 +63,8 @@ async function render() {
           show('warn', 'No company registration', 'This account has no company registration linked to it. Register your company first.');
           return;
         }
-        const to = destination(role);
+        // A company whose portal registration is not complete finishes it first.
+        const to = me.supplier && !me.supplier.portal_registered_at ? '/register' : destination(role);
         if (!to) {
           await sb.auth.signOut();
           show('warn', 'Not for this portal', 'This portal is for registered suppliers and procurement officers. '

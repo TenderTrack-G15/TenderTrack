@@ -842,7 +842,7 @@ begin
     raise exception 'Your registration was not approved. Correct it and resubmit before bidding.';
   end if;
   if v_supplier.portal_registered_at is null then
-    raise exception 'Complete your company registration on the eTender portal before bidding.';
+    raise exception 'Finish your company''s registration on the eTender portal before bidding: sign in and open My bids & awards.';
   end if;
 
   select * into v_tender from tenders where id = p_tender_id;
@@ -1254,8 +1254,11 @@ revoke all on function guard_tender_award_status()     from public, anon, authen
 -- ---------------------------------------------------------------------------
 -- 13. Registering for TenderTrack as well as on the eTender portal
 -- ---------------------------------------------------------------------------
--- The portal registration creates the company (the government's record). The
--- company then registers for TenderTrack in the app with the same account,
+-- The portal registration creates the company (the government's record); the
+-- portal's server records it once the registration is complete (contact,
+-- banking, required documents). A company created any other way (for example
+-- the app's older sign-up) finishes its registration on the portal itself.
+-- The company then registers for TenderTrack in the app with the same account,
 -- proving it with its CSD and company registration numbers and a 6-digit code
 -- emailed to the contact address held by the portal. portal_registered_at is
 -- set only by the portal's server (secret key); app_registered_at only by
@@ -1306,7 +1309,7 @@ begin
     raise exception 'Only a supplier account can do this.';
   end if;
   if v_supplier.portal_registered_at is null then
-    raise exception 'Register your company on the eTender portal first, then register for TenderTrack.';
+    raise exception 'Finish your company''s registration on the eTender portal first (sign in there with this email and password), then register for TenderTrack.';
   end if;
   if v_supplier.app_registered_at is null then
     raise exception 'Finish registering for TenderTrack first: Supplier login, then Register an account.';
@@ -1357,7 +1360,7 @@ begin
     raise exception 'This account has no company. Register your company on the eTender portal first.';
   end if;
   if v_supplier.portal_registered_at is null then
-    raise exception 'This company was not registered on the eTender portal. Register there first.';
+    raise exception 'Your company''s registration on the eTender portal is not complete. Sign in on the portal with this email and password to finish it, then come back.';
   end if;
   if v_supplier.app_registered_at is not null then
     return jsonb_build_object('already', true, 'company_name', v_supplier.company_name);

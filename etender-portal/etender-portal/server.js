@@ -7,9 +7,9 @@
  *
  * This server does four jobs:
  *   1. Serves the portal at http://localhost:5070 — on this computer only.
- *   2. Registers a new supplier's login and marks the company as registered
- *      on the portal (needs Supabase's secret key, which never reaches the
- *      browser).
+ *   2. Registers a new supplier's login, and records the company as
+ *      registered on the portal once its registration is complete (both need
+ *      Supabase's secret key, which never reaches the browser).
  *   3. Delivers the database's email outbox: award codes and bid receipts.
  *      With SMTP settings in .env it sends real emails (for example through
  *      Gmail); without them it keeps them in a demo mailbox on this computer.
@@ -277,15 +277,55 @@ async function registerSupplier(body) {
   const data = await readBody(res);
   if (!res.ok) throw new HttpError(res.status === 422 ? 409 : 400, friendlyAuthError(data, res.status));
 
-  // Records that this company registered through the portal. Only this server
-  // (secret key) can set it; registering for TenderTrack in the app needs it.
-  const marked = await restAsServer('PATCH', `suppliers?owner_id=eq.${encodeURIComponent(data.id)}`,
-    { portal_registered_at: new Date().toISOString() }, { Prefer: 'return=representation' });
-  if (!Array.isArray(marked) || marked.length !== 1) {
-    throw new HttpError(500, 'The login was created, but the company record was not. Contact the TenderTrack administrator.');
-  }
   log(`registered ${company.company_name} (${company.csd_number}) as ${email}`);
+  // The page now saves the profile, compliance, banking and documents with the
+  // new login, then calls /api/register/complete, which records the portal
+  // registration once everything is there.
   return { ok: true, email };
+}
+
+/** The documents a portal registration must include (names as in default_supplier_documents). */
+const REQUIRED_DOCUMENTS = [
+  'Company registration certificate (CIPC)', 'Tax clearance certificate / PIN', 'Proof of business address',
+  'Company profile', 'Proof of banking details',
+];
+
+/**
+ * Records that the signed-in supplier's company is registered on the portal,
+ * once the registration is complete: contact details, banking and the required
+ * documents. Called at the end of every registration on the portal, including
+ * a company finishing one that was started elsewhere (for example the older
+ * sign-up in the app). Only this server can set the flag (secret key), and it
+ * checks the records itself rather than trusting the page.
+ */
+async function completeRegistration(token) {
+  const user = await userFromToken(token);
+  const rows = await restAsServer('GET',
+    `suppliers?select=id,company_name,csd_number,contact_email,contact_person,physical_address,mobile_number,portal_registered_at&owner_id=eq.${encodeURIComponent(user.id)}`);
+  const supplier = Array.isArray(rows) ? rows[0] : null;
+  if (!supplier) throw new HttpError(404, 'This account has no company registration. Register your company first.');
+  if (supplier.portal_registered_at) return { ok: true, already: true, company: supplier.company_name };
+
+  const missing = [];
+  if (!supplier.contact_email || !supplier.contact_person || !supplier.physical_address || !supplier.mobile_number) {
+    missing.push('contact information');
+  }
+  const banking = await restAsServer('GET', `supplier_banking?select=supplier_id&supplier_id=eq.${supplier.id}`);
+  if (!Array.isArray(banking) || banking.length === 0) missing.push('banking information');
+  const documents = await restAsServer('GET', `supplier_documents?select=name,status,reference&supplier_id=eq.${supplier.id}`);
+  const provided = new Set((documents || [])
+    .filter((d) => ['submitted', 'verified'].includes(d.status) && String(d.reference || '').trim())
+    .map((d) => d.name));
+  const missingDocuments = REQUIRED_DOCUMENTS.filter((name) => !provided.has(name));
+  if (missingDocuments.length) missing.push(`current documents: ${missingDocuments.join('; ')}`);
+  if (missing.length) {
+    throw new HttpError(400, `The registration is not complete yet. Still needed: ${missing.join(', ')}.`);
+  }
+
+  await restAsServer('PATCH', `suppliers?id=eq.${supplier.id}`,
+    { portal_registered_at: new Date().toISOString() }, { Prefer: 'return=minimal' });
+  log(`portal registration complete: ${supplier.company_name} (${supplier.csd_number})`);
+  return { ok: true, already: false, company: supplier.company_name };
 }
 
 // ---------------------------------------------------------------------------
@@ -590,6 +630,12 @@ async function handleApi(req, res, urlPath) {
       if (rateLimited(`register:${req.socket.remoteAddress}`, 10)) throw new HttpError(429, 'Too many attempts. Wait a minute.');
       return send(res, 201, await registerSupplier(await readJson(req)));
     }
+    if (req.method === 'POST' && urlPath === '/api/register/complete') {
+      if (rateLimited(`complete:${req.socket.remoteAddress}`, 20)) throw new HttpError(429, 'Too many attempts. Wait a minute.');
+      const token = bearer(req);
+      await readJson(req);
+      return send(res, 200, await completeRegistration(token));
+    }
     if (req.method === 'POST' && urlPath === '/api/outbox/run') {
       if (rateLimited(`outbox:${req.socket.remoteAddress}`, 30)) throw new HttpError(429, 'Too many requests.');
       await readJson(req);
@@ -667,4 +713,4 @@ if (require.main === module) {
   runOutbox();
 }
 
-module.exports = { createServer, checkConfig, runOutbox, smtpSend, buildMessage, registerSupplier, readMailbox, mayEmail, SMTP_ENABLED: SMTP.enabled };
+module.exports = { createServer, checkConfig, runOutbox, smtpSend, buildMessage, registerSupplier, completeRegistration, readMailbox, mayEmail, SMTP_ENABLED: SMTP.enabled };
