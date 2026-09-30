@@ -257,6 +257,18 @@ private fun RegisterFirst(home: SupplierHome, supplierName: String, onRegister: 
         title = home.registration?.companyName?.ifBlank { null } ?: home.profile?.companyName ?: "Welcome",
         subtitle = "Signed in as $supplierName"
     )
+    if (home.registration?.portalRegistered == false) {
+        // The company's own step on the portal comes first; no one else has to do anything.
+        NoteBanner(
+            title = "Finish your eTender registration first",
+            text = "Your company's registration on the eTender portal is not complete. Sign in on the portal " +
+                "with this email and password: it opens the registration so you can check your details, add " +
+                "anything missing and submit. Then come back here to register for TenderTrack.",
+            tone = NoteTone.Warning,
+            icon = Icons.Default.Shield
+        )
+        return
+    }
     NoteBanner(
         title = "Finish registering for TenderTrack",
         text = "Your company is registered on the eTender portal. To use TenderTrack as well, confirm it here " +
