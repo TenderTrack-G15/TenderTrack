@@ -1,5 +1,8 @@
 package za.ac.tendertrack.ui.nav
 
+import androidx.compose.runtime.Composable
+import androidx.navigation.NamedNavArgument
+import androidx.navigation.NavBackStackEntry
 import androidx.navigation.NavGraphBuilder
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
@@ -15,6 +18,11 @@ import za.ac.tendertrack.ui.screens.supplier.*
  * Awards: a tender awarded on the eTender portal appears under Awards. The
  * supplier claims it on Claim award with the 10-digit code it was emailed,
  * and only then can update the contract's deliverables.
+ *
+ * Navigation panel: every supplier screen sits in the supplier's own panel
+ * (SupplierDrawer.kt), which opens with a swipe from the left edge. The main
+ * screens (Dashboard, Awards, My Company) show the menu button; the screens
+ * opened from them keep their Back arrow, as on the officer's side.
  */
 object SupplierRoutes {
     const val HOME = "supplier_home"
@@ -39,7 +47,22 @@ fun NavGraphBuilder.supplierGraph(
     currentProfile: () -> Profile?,
     onSignOut: () -> Unit
 ) {
-    composable(SupplierRoutes.HOME) {
+    // Adds a supplier destination wrapped in the navigation panel.
+    fun screen(
+        route: String,
+        arguments: List<NamedNavArgument> = emptyList(),
+        content: @Composable (entry: NavBackStackEntry, openDrawer: () -> Unit) -> Unit
+    ) {
+        composable(route = route, arguments = arguments) { entry ->
+            SupplierDrawerHost(navController, route, currentProfile, onSignOut) { openDrawer ->
+                content(entry, openDrawer)
+            }
+        }
+    }
+
+    val tenderIdArgument = listOf(navArgument("tenderId") { type = NavType.StringType })
+
+    screen(SupplierRoutes.HOME) { _, openDrawer ->
         SupplierHomeScreen(
             supplierName = currentProfile()?.fullName ?: "Supplier",
             onOpenTender = { id -> navController.navigate(SupplierRoutes.tender(id)) },
@@ -48,53 +71,50 @@ fun NavGraphBuilder.supplierGraph(
             onClaim = { id -> navController.navigate(SupplierRoutes.claim(id)) },
             // A company registered on the eTender portal but not yet for TenderTrack.
             onRegister = { navController.navigate(AccountRoutes.SUPPLIER_SIGN_UP) },
-            onSignOut = onSignOut
+            onSignOut = onSignOut,
+            onMenu = openDrawer
         )
     }
 
-    composable(
-        route = SupplierRoutes.TENDER,
-        arguments = listOf(navArgument("tenderId") { type = NavType.StringType })
-    ) { entry ->
+    screen(SupplierRoutes.TENDER, tenderIdArgument) { entry, _ ->
         SupplierTenderScreen(
             tenderId = entry.arguments?.getString("tenderId").orEmpty(),
             onBack = { navController.popBackStack() }
         )
     }
 
-    composable(SupplierRoutes.COMPANY) {
+    screen(SupplierRoutes.COMPANY) { _, openDrawer ->
         MyCompanyScreen(
             onBack = { navController.popBackStack() },
             onEditProfile = { navController.navigate(SupplierRoutes.COMPANY_EDIT) },
             onOpenBanking = { navController.navigate(SupplierRoutes.BANKING) },
-            onOpenDocuments = { navController.navigate(SupplierRoutes.DOCUMENTS) }
+            onOpenDocuments = { navController.navigate(SupplierRoutes.DOCUMENTS) },
+            onMenu = openDrawer
         )
     }
 
-    composable(SupplierRoutes.COMPANY_EDIT) {
+    screen(SupplierRoutes.COMPANY_EDIT) { _, _ ->
         CompanyProfileScreen(onDone = { navController.popBackStack() })
     }
 
-    composable(SupplierRoutes.BANKING) {
+    screen(SupplierRoutes.BANKING) { _, _ ->
         BankingScreen(onDone = { navController.popBackStack() })
     }
 
-    composable(SupplierRoutes.DOCUMENTS) {
+    screen(SupplierRoutes.DOCUMENTS) { _, _ ->
         DocumentsScreen(onBack = { navController.popBackStack() })
     }
 
-    composable(SupplierRoutes.AWARDS) {
+    screen(SupplierRoutes.AWARDS) { _, openDrawer ->
         MyAwardsScreen(
             onBack = { navController.popBackStack() },
             onClaim = { id -> navController.navigate(SupplierRoutes.claim(id)) },
-            onOpenContract = { id -> navController.navigate(SupplierRoutes.contract(id)) }
+            onOpenContract = { id -> navController.navigate(SupplierRoutes.contract(id)) },
+            onMenu = openDrawer
         )
     }
 
-    composable(
-        route = SupplierRoutes.CLAIM,
-        arguments = listOf(navArgument("tenderId") { type = NavType.StringType })
-    ) { entry ->
+    screen(SupplierRoutes.CLAIM, tenderIdArgument) { entry, _ ->
         ClaimAwardScreen(
             tenderId = entry.arguments?.getString("tenderId").orEmpty(),
             onBack = { navController.popBackStack() },
@@ -109,10 +129,7 @@ fun NavGraphBuilder.supplierGraph(
         )
     }
 
-    composable(
-        route = SupplierRoutes.CONTRACT,
-        arguments = listOf(navArgument("tenderId") { type = NavType.StringType })
-    ) { entry ->
+    screen(SupplierRoutes.CONTRACT, tenderIdArgument) { entry, _ ->
         ContractScreen(
             tenderId = entry.arguments?.getString("tenderId").orEmpty(),
             onBack = { navController.popBackStack() },

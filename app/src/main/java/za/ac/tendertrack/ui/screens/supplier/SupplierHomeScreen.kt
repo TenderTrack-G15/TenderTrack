@@ -1,13 +1,16 @@
 package za.ac.tendertrack.ui.screens.supplier
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
@@ -115,6 +118,8 @@ fun SupplierHomeScreen(
     onClaim: (String) -> Unit,
     onRegister: () -> Unit,
     onSignOut: () -> Unit,
+    /** Opens the supplier's navigation panel; the menu button shows when it is given. */
+    onMenu: (() -> Unit)? = null,
     viewModel: SupplierHomeViewModel = viewModel()
 ) {
     val state by viewModel.state.collectAsState()
@@ -128,10 +133,11 @@ fun SupplierHomeScreen(
 
     AppScaffold(
         title = "TenderTrack",
+        onMenu = onMenu,
         // Until the company has registered for TenderTrack, only signing out is offered.
+        // My company and the rest are in the navigation panel.
         actions = if (loaded?.mustRegister == true) listOf(signOut) else listOf(
             TopBarAction(Icons.Default.EmojiEvents, "Awards", badgeCount = waiting) { onOpenAwards() },
-            TopBarAction(Icons.Default.Business, "My company") { onOpenCompany() },
             signOut
         )
     ) {
@@ -151,39 +157,32 @@ fun SupplierHomeScreen(
                     }
                 )
 
-                Row(horizontalArrangement = Arrangement.spacedBy(Dimens.GridGap)) {
-                    StatTile("Open for bids", "${home.open.size}", Modifier.weight(1f), "Accepting bids now")
-                    StatTile(
-                        "Closing this week", "${home.closingSoon}", Modifier.weight(1f), "Within 7 days",
-                        alert = home.closingSoon > 0
-                    )
-                }
-                Spacer(Modifier.height(Dimens.GridGap))
-                Row(horizontalArrangement = Arrangement.spacedBy(Dimens.GridGap)) {
-                    StatTile(
-                        "My registration", home.profile?.status?.supplierLabel() ?: "None",
-                        Modifier.weight(1f), home.profile?.reference ?: "Not registered",
-                        onClick = onOpenCompany
-                    )
-                    StatTile(
-                        "Documents outstanding", "${home.documentsOutstanding}",
-                        Modifier.weight(1f), "Of ${home.profile?.documentsRequired ?: 6} required",
-                        alert = home.documentsOutstanding > 0,
-                        onClick = onOpenCompany
-                    )
-                }
-
-                Spacer(Modifier.height(Dimens.GridGap))
-                Row(horizontalArrangement = Arrangement.spacedBy(Dimens.GridGap)) {
-                    StatTile(
-                        "Awaiting your code", "${home.awaitingCode.size}", Modifier.weight(1f), "Claim under Awards",
-                        alert = home.awaitingCode.isNotEmpty(),
-                        onClick = onOpenAwards
-                    )
-                    StatTile(
-                        "Active contracts",
-                        "${home.awards.count { it.isClaimed && it.status != TenderStatus.COMPLETED }}",
-                        Modifier.weight(1f), "Deliverables to update",
+                // The tiles sit in their own column so the gaps between rows match the gap between tiles.
+                Column(verticalArrangement = Arrangement.spacedBy(Dimens.GridGap)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(Dimens.GridGap)) {
+                        StatTile("Open for bids", "${home.open.size}", Modifier.weight(1f), "Accepting bids now")
+                        StatTile(
+                            "Closing this week", "${home.closingSoon}", Modifier.weight(1f), "Within 7 days",
+                            alert = home.closingSoon > 0
+                        )
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(Dimens.GridGap)) {
+                        StatTile(
+                            "My registration", home.profile?.status?.supplierLabel() ?: "None",
+                            Modifier.weight(1f), home.profile?.reference ?: "Not registered",
+                            onClick = onOpenCompany
+                        )
+                        StatTile(
+                            "Documents outstanding", "${home.documentsOutstanding}",
+                            Modifier.weight(1f), "Of ${home.profile?.documentsRequired ?: 6} required",
+                            alert = home.documentsOutstanding > 0,
+                            onClick = onOpenCompany
+                        )
+                    }
+                    // One tile for both award figures: they open the same page.
+                    AwardsTile(
+                        awaitingCode = home.awaitingCode.size,
+                        activeContracts = home.awards.count { it.isClaimed && it.status != TenderStatus.COMPLETED },
                         onClick = onOpenAwards
                     )
                 }
@@ -243,6 +242,71 @@ fun SupplierHomeScreen(
                 }
             }
         }
+    }
+}
+
+/**
+ * Both award figures in one tile, since both open Awards: codes still to be
+ * entered (red while any are waiting) and contracts with deliverables to update.
+ */
+@Composable
+private fun AwardsTile(awaitingCode: Int, activeContracts: Int, onClick: () -> Unit) {
+    val alert = awaitingCode > 0
+    AppCard(
+        background = if (alert) AppColor.DangerSurface else AppColor.Surface,
+        border = if (alert) AppColor.DangerBorder else AppColor.Line,
+        onClick = onClick
+    ) {
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(Dimens.GridGap),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            AwardFigure(
+                label = "Awaiting your code",
+                value = awaitingCode,
+                footnote = "Claim under Awards",
+                alert = alert,
+                modifier = Modifier.weight(1f)
+            )
+            Box(
+                Modifier
+                    .width(1.dp)
+                    .height(56.dp)
+                    .background(if (alert) AppColor.DangerBorder else AppColor.Line)
+            )
+            AwardFigure(
+                label = "Active contracts",
+                value = activeContracts,
+                footnote = "Deliverables to update",
+                alert = false,
+                modifier = Modifier.weight(1f)
+            )
+            AppIcon(
+                Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                tint = if (alert) AppColor.DangerInk else AppColor.MutedLight,
+                contentDescription = "Open Awards"
+            )
+        }
+    }
+}
+
+@Composable
+private fun AwardFigure(label: String, value: Int, footnote: String, alert: Boolean, modifier: Modifier = Modifier) {
+    Column(modifier) {
+        Text(label, style = AppType.StatLabel, maxLines = 2)
+        Spacer(Modifier.height(2.dp))
+        Text(
+            "$value",
+            style = AppType.StatValue.copy(color = if (alert) AppColor.DangerInk else AppColor.Ink),
+            maxLines = 1
+        )
+        Spacer(Modifier.height(3.dp))
+        Text(
+            footnote,
+            style = AppType.StatFoot.copy(color = if (alert) AppColor.DangerInk else AppColor.MutedLight),
+            maxLines = 2
+        )
     }
 }
 
