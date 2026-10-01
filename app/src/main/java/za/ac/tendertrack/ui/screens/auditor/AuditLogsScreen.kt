@@ -78,11 +78,13 @@ class AuditLogsViewModel(
 @Composable
 fun AuditLogsScreen(
     onBack: () -> Unit,
+    /** Opens the auditor's navigation panel; shown instead of Back when given. */
+    onMenu: (() -> Unit)? = null,
     viewModel: AuditLogsViewModel = viewModel()
 ) {
     val state by viewModel.state.collectAsState()
 
-    AppScaffold(title = "Audit Logs", onBack = onBack) {
+    AppScaffold(title = "Audit Logs", onBack = onBack, onMenu = onMenu) {
         SearchField(
             value = state.query,
             onValueChange = viewModel::onQuery,

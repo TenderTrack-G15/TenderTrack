@@ -56,6 +56,16 @@ class ComplianceReportsViewModel(
     }
 
     fun onOnlyProblems(v: Boolean) = _state.update { it.copy(onlyProblems = v) }
+
+    // The filter the navigation panel asked for. It is applied once per request, so
+    // coming back from a record keeps whichever chip was chosen since.
+    private var requestedOnlyProblems: Boolean? = null
+
+    fun showOnlyProblems(onlyProblems: Boolean) {
+        if (requestedOnlyProblems == onlyProblems) return
+        requestedOnlyProblems = onlyProblems
+        onOnlyProblems(onlyProblems)
+    }
 }
 
 /**
@@ -67,11 +77,17 @@ class ComplianceReportsViewModel(
 fun ComplianceReportsScreen(
     onBack: () -> Unit,
     onOpenRecord: (String) -> Unit,
+    /** Start on "Needs attention" (from the navigation panel). */
+    onlyProblems: Boolean = false,
+    /** Opens the auditor's navigation panel; shown instead of Back when given. */
+    onMenu: (() -> Unit)? = null,
     viewModel: ComplianceReportsViewModel = viewModel()
 ) {
     val state by viewModel.state.collectAsState()
 
-    AppScaffold(title = "Compliance Reports", onBack = onBack) {
+    LaunchedEffect(onlyProblems) { viewModel.showOnlyProblems(onlyProblems) }
+
+    AppScaffold(title = "Compliance Reports", onBack = onBack, onMenu = onMenu) {
         ScreenHeading(
             eyebrow = "Auditor",
             title = "Compliance",

@@ -73,6 +73,8 @@ fun AuditorHomeScreen(
     onOpenLogs: () -> Unit,
     onOpenCompliance: () -> Unit,
     onSignOut: () -> Unit,
+    /** Opens the auditor's navigation panel; the menu button shows when it is given. */
+    onMenu: (() -> Unit)? = null,
     viewModel: AuditorHomeViewModel = viewModel()
 ) {
     val state by viewModel.state.collectAsState()
@@ -81,6 +83,7 @@ fun AuditorHomeScreen(
 
     AppScaffold(
         title = "TenderTrack",
+        onMenu = onMenu,
         actions = listOf(
             TopBarAction(Icons.Default.Refresh, "Refresh") { viewModel.load() },
             TopBarAction(Icons.AutoMirrored.Filled.Logout, "Sign out") { onSignOut() }
@@ -91,7 +94,6 @@ fun AuditorHomeScreen(
             title = "Audit and verification",
             subtitle = "Signed in as $auditorName · read-only across every record"
         )
-        AnnouncementsBanner(AnnouncementViewer.STAFF)
 
         when (val result = state) {
             is UiState.Loading -> LoadingState(message = "Loading records…")

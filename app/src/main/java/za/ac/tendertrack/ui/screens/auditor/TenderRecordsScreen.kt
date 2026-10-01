@@ -65,6 +65,18 @@ class TenderRecordsViewModel(
 
     fun onQuery(v: String) = _state.update { it.copy(query = v) }
     fun onStatus(v: TenderStatus?) = _state.update { it.copy(status = v) }
+
+    // The status the navigation panel asked for. It is applied once per request, so
+    // coming back from a record keeps whichever chip was chosen since.
+    private var statusRequested = false
+    private var requestedStatus: TenderStatus? = null
+
+    fun showStatus(status: TenderStatus?) {
+        if (statusRequested && requestedStatus == status) return
+        statusRequested = true
+        requestedStatus = status
+        onStatus(status)
+    }
 }
 
 /**
@@ -75,11 +87,17 @@ class TenderRecordsViewModel(
 fun TenderRecordsScreen(
     onBack: () -> Unit,
     onOpenRecord: (String) -> Unit,
+    /** The status chip to start on (from the navigation panel); null shows every status. */
+    status: TenderStatus? = null,
+    /** Opens the auditor's navigation panel; shown instead of Back when given. */
+    onMenu: (() -> Unit)? = null,
     viewModel: TenderRecordsViewModel = viewModel()
 ) {
     val state by viewModel.state.collectAsState()
 
-    AppScaffold(title = "Tender Records", onBack = onBack) {
+    LaunchedEffect(status) { viewModel.showStatus(status) }
+
+    AppScaffold(title = "Tender Records", onBack = onBack, onMenu = onMenu) {
         SearchField(
             value = state.query,
             onValueChange = viewModel::onQuery,
