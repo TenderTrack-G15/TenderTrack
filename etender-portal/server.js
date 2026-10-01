@@ -51,7 +51,7 @@ function loadEnv(file) {
 
 const ROOT = __dirname;
 /** Shown in the page footer and when the server starts, to check which files are running. */
-const PORTAL_VERSION = '2026-09-30b';
+const PORTAL_VERSION = '2026-10-01';
 const ENV = { ...loadEnv(path.join(ROOT, '.env')), ...process.env };
 const PORT = Number(ENV.PORTAL_PORT || 5070);
 const HOST = '127.0.0.1'; // loopback only — deliberately not configurable

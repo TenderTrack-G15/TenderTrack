@@ -42,9 +42,8 @@ export async function chrome(page) {
         role === 'procurement_officer' ? ` · ${who.profile.department || 'Procurement officer'}` : ''),
       h('button', { class: 'btn btn-secondary btn-sm', type: 'button', onclick: () => signOut('/') }, 'Sign out'));
   } else {
-    put(user, 
-      h('a', { class: 'btn btn-secondary btn-sm', href: '/signin' }, 'Sign in'),
-      h('a', { class: 'btn btn-primary btn-sm', href: '/register' }, 'Register as a supplier'));
+    // One way to sign in, at the top. Registering is under "Supplier registration" in the menu bar.
+    put(user, h('a', { class: 'btn btn-secondary btn-sm', href: '/signin' }, 'Sign in'));
   }
   header.appendChild(h('div', { class: 'header-inner' }, logo(), user));
 
@@ -62,7 +61,6 @@ export async function chrome(page) {
     right.push(['mailbox', '/mailbox', 'Demo mailbox']);
   }
   if (role === 'procurement_officer') right.push(['department', '/department', 'Department console']);
-  if (!who) right.push(['signin', '/signin', 'Sign in']);
 
   const nav = clear(document.getElementById('site-nav'));
   nav.appendChild(h('div', { class: 'nav-inner' },
