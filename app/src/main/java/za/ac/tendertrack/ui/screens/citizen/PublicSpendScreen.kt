@@ -62,11 +62,13 @@ class PublicSpendViewModel(
 fun PublicSpendScreen(
     onBack: () -> Unit,
     onOpenTenders: () -> Unit,
+    /** Opens the public navigation panel; shown instead of Back when given. */
+    onMenu: (() -> Unit)? = null,
     viewModel: PublicSpendViewModel = viewModel()
 ) {
     val state by viewModel.state.collectAsState()
 
-    AppScaffold(title = "Spending", onBack = onBack) {
+    AppScaffold(title = "Spending", onBack = onBack, onMenu = onMenu) {
         ScreenHeading(
             eyebrow = "Fund utilisation",
             title = "Where the money goes",

@@ -1,5 +1,8 @@
 package za.ac.tendertrack.ui.nav
 
+import androidx.compose.runtime.Composable
+import androidx.navigation.NamedNavArgument
+import androidx.navigation.NavBackStackEntry
 import androidx.navigation.NavGraphBuilder
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
@@ -36,39 +39,57 @@ object CitizenRoutes {
  * TenderTrackNavGraph, so this flow can change without touching the officer
  * navigation.
  *
- * Back-stack: Sign In → Public Dashboard → (search / spend / report / track).
- * Back from the dashboard returns to Sign In.
+ * Back-stack: Welcome → Public Dashboard → (search / spend / report / track).
+ * Back from the dashboard returns to Welcome.
+ *
+ * Navigation panel: every citizen screen sits in the public navigation panel
+ * (CitizenDrawer.kt), which opens with a swipe from the left edge. The main
+ * screens (Dashboard, Search Tenders, Spending) show the menu button; a tender,
+ * the report form and report tracking keep their Back arrow.
  */
 fun NavGraphBuilder.citizenGraph(navController: NavHostController) {
 
-    composable(CitizenRoutes.HOME) {
+    // Adds a citizen destination wrapped in the navigation panel.
+    fun screen(
+        route: String,
+        arguments: List<NamedNavArgument> = emptyList(),
+        content: @Composable (entry: NavBackStackEntry, openDrawer: () -> Unit) -> Unit
+    ) {
+        composable(route = route, arguments = arguments) { entry ->
+            CitizenDrawerHost(navController, route) { openDrawer -> content(entry, openDrawer) }
+        }
+    }
+
+    screen(CitizenRoutes.HOME) { _, openDrawer ->
         PublicHomeScreen(
             onBack = { navController.popBackStack() },
             onOpenTenders = { status -> navController.navigate(CitizenRoutes.tenders(status)) },
             onOpenSpend = { navController.navigate(CitizenRoutes.SPEND) { launchSingleTop = true } },
             onFlagTender = { navController.navigate(CitizenRoutes.report()) },
-            onTrackReport = { navController.navigate(CitizenRoutes.track()) }
+            onTrackReport = { navController.navigate(CitizenRoutes.track()) },
+            onMenu = openDrawer
         )
     }
 
-    composable(
+    screen(
         route = CitizenRoutes.TENDERS,
         arguments = listOf(navArgument("status") { type = NavType.StringType; defaultValue = "" })
-    ) { entry ->
+    ) { entry, openDrawer ->
         val raw = entry.arguments?.getString("status").orEmpty()
         // An unknown value falls back to "all" rather than crashing.
         val status = TenderStatus.entries.firstOrNull { it.name == raw }
         PublicTenderListScreen(
             initialStatus = status,
             onBack = { navController.popBackStack() },
-            onOpenTender = { id -> navController.navigate(CitizenRoutes.tenderDetail(id)) }
+            onOpenTender = { id -> navController.navigate(CitizenRoutes.tenderDetail(id)) },
+            onMenu = openDrawer
         )
     }
 
-    composable(
+    screen(
         route = CitizenRoutes.TENDER_DETAIL,
         arguments = listOf(navArgument("tenderId") { type = NavType.StringType })
-    ) { entry ->
+    ) { entry, _ ->
         PublicTenderDetailScreen(
             tenderId = entry.arguments?.getString("tenderId").orEmpty(),
             onBack = { navController.popBackStack() },
@@ -76,10 +97,10 @@ fun NavGraphBuilder.citizenGraph(navController: NavHostController) {
         )
     }
 
-    composable(
+    screen(
         route = CitizenRoutes.REPORT,
         arguments = listOf(navArgument("tenderId") { type = NavType.StringType; defaultValue = "" })
-    ) { entry ->
+    ) { entry, _ ->
         val raw = entry.arguments?.getString("tenderId").orEmpty()
         ReportConcernScreen(
             tenderId = raw.ifBlank { null },
@@ -94,10 +115,10 @@ fun NavGraphBuilder.citizenGraph(navController: NavHostController) {
         )
     }
 
-    composable(
+    screen(
         route = CitizenRoutes.TRACK,
         arguments = listOf(navArgument("reference") { type = NavType.StringType; defaultValue = "" })
-    ) { entry ->
+    ) { entry, _ ->
         val raw = entry.arguments?.getString("reference").orEmpty()
         TrackReportScreen(
             initialReference = raw.ifBlank { null },
@@ -106,10 +127,11 @@ fun NavGraphBuilder.citizenGraph(navController: NavHostController) {
         )
     }
 
-    composable(CitizenRoutes.SPEND) {
+    screen(CitizenRoutes.SPEND) { _, openDrawer ->
         PublicSpendScreen(
             onBack = { navController.popBackStack() },
-            onOpenTenders = { navController.navigate(CitizenRoutes.tenders()) }
+            onOpenTenders = { navController.navigate(CitizenRoutes.tenders()) },
+            onMenu = openDrawer
         )
     }
 }
