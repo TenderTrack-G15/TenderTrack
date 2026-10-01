@@ -115,7 +115,9 @@ class PublicTenderListViewModel(
 fun PublicTenderListScreen(
     initialStatus: TenderStatus?,
     onBack: () -> Unit,
-    onOpenTender: (String) -> Unit
+    onOpenTender: (String) -> Unit,
+    /** Opens the public navigation panel; shown instead of Back when given. */
+    onMenu: (() -> Unit)? = null
 ) {
     val viewModel: PublicTenderListViewModel = viewModel(
         key = "public_tenders_${initialStatus?.name ?: "all"}",
@@ -123,7 +125,7 @@ fun PublicTenderListScreen(
     )
     val state by viewModel.state.collectAsState()
 
-    AppScaffold(title = "Search Tenders", onBack = onBack) {
+    AppScaffold(title = "Search Tenders", onBack = onBack, onMenu = onMenu) {
         SearchField(
             value = state.query,
             onValueChange = viewModel::onQuery,

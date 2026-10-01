@@ -1,12 +1,16 @@
 package za.ac.tendertrack.ui.screens.citizen
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -21,6 +25,7 @@ import za.ac.tendertrack.data.model.PublicDashboard
 import za.ac.tendertrack.data.model.TenderStatus
 import za.ac.tendertrack.data.repo.PublicRepository
 import za.ac.tendertrack.ui.components.*
+import za.ac.tendertrack.ui.theme.AppColor
 import za.ac.tendertrack.ui.theme.AppType
 import za.ac.tendertrack.ui.theme.Dimens
 
@@ -60,7 +65,8 @@ class PublicHomeViewModel(
 /**
  * Public Dashboard — FR14 and FR11. Live counts by lifecycle state, value
  * awarded against value paid, and delivery progress, all without an account.
- * Every tile opens the search pre-filtered to what it counts.
+ * Every tender tile opens the search pre-filtered to what it counts; the money
+ * tile opens Spending by department.
  */
 @Composable
 fun PublicHomeScreen(
@@ -69,6 +75,8 @@ fun PublicHomeScreen(
     onOpenSpend: () -> Unit,
     onFlagTender: () -> Unit,
     onTrackReport: () -> Unit,
+    /** Opens the public navigation panel; the menu button shows instead of Back when given. */
+    onMenu: (() -> Unit)? = null,
     viewModel: PublicHomeViewModel = viewModel()
 ) {
     val state by viewModel.state.collectAsState()
@@ -76,6 +84,7 @@ fun PublicHomeScreen(
     AppScaffold(
         title = "TenderTrack",
         onBack = onBack,
+        onMenu = onMenu,
         actions = listOf(
             TopBarAction(Icons.Default.Search, "Search tenders") { onOpenTenders(null) },
             TopBarAction(Icons.Default.Refresh, "Refresh figures") { viewModel.load() }
@@ -168,32 +177,20 @@ private fun DashboardBody(
 
     // -- Money and delivery (FR11) -------------------------------------------
     SectionHeader("Money and delivery")
-    Row(horizontalArrangement = Arrangement.spacedBy(Dimens.GridGap)) {
-        StatTile(
-            "Value awarded", Format.moneyCompact(summary.valueAwarded),
-            Modifier.weight(1f), contractsCaption,
-            money = true,
-            onClick = onOpenSpend
-        )
-        StatTile(
-            "Paid to suppliers", Format.moneyCompact(summary.paidToSuppliers),
-            Modifier.weight(1f), paidCaption,
-            money = true,
-            onClick = onOpenSpend
-        )
-    }
+    // One tile for both figures: they open the same page (Spending by department).
+    MoneyTile(
+        valueAwarded = Format.moneyCompact(summary.valueAwarded),
+        awardedCaption = contractsCaption,
+        paidToSuppliers = Format.moneyCompact(summary.paidToSuppliers),
+        paidCaption = paidCaption,
+        onClick = onOpenSpend
+    )
 
     UtilisationCard(
         title = "Deliverables completed",
         caption = if (summary.deliverablesTotal == 0) "No delivery phases have been published yet"
         else "${summary.deliverablesCompleted} of ${summary.deliverablesTotal} delivery phases signed off",
         fraction = summary.deliveryFraction
-    )
-
-    SecondaryButton(
-        text = "Spending by department",
-        icon = Icons.Default.AccountBalance,
-        onClick = onOpenSpend
     )
 
     // -- Citizen participation (FR15) ----------------------------------------
@@ -215,4 +212,50 @@ private fun DashboardBody(
         textAlign = TextAlign.Center,
         modifier = Modifier.fillMaxWidth()
     )
+}
+
+/**
+ * Value awarded and paid to suppliers in one tile, since both open Spending by
+ * department. Same label, figure and footnote styles as StatTile.
+ */
+@Composable
+private fun MoneyTile(
+    valueAwarded: String,
+    awardedCaption: String,
+    paidToSuppliers: String,
+    paidCaption: String,
+    onClick: () -> Unit
+) {
+    AppCard(onClick = onClick) {
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(Dimens.GridGap),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            MoneyFigure("Value awarded", valueAwarded, awardedCaption, Modifier.weight(1f))
+            Box(
+                Modifier
+                    .width(1.dp)
+                    .height(56.dp)
+                    .background(AppColor.Line)
+            )
+            MoneyFigure("Paid to suppliers", paidToSuppliers, paidCaption, Modifier.weight(1f))
+            AppIcon(
+                Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                tint = AppColor.MutedLight,
+                contentDescription = "Open spending by department"
+            )
+        }
+    }
+}
+
+@Composable
+private fun MoneyFigure(label: String, value: String, footnote: String, modifier: Modifier = Modifier) {
+    Column(modifier) {
+        Text(label, style = AppType.StatLabel, maxLines = 2)
+        Spacer(Modifier.height(2.dp))
+        Text(value, style = AppType.StatValueMoney.copy(color = AppColor.Ink), maxLines = 1)
+        Spacer(Modifier.height(3.dp))
+        Text(footnote, style = AppType.StatFoot.copy(color = AppColor.MutedLight), maxLines = 2)
+    }
 }
