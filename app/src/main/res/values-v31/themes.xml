@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Android 12 and newer show a system splash (the app icon on a plain
+  background) for a moment while an app starts. Here it is a plain screen in
+  the app's background colour, with no icon, so it flows straight into the
+  animated splash, where the logo appears after the handshake.
+
+  These are the same four lines as values/themes.xml, plus the last two.
+  If you change values/themes.xml, make the same change here.
+-->
+<resources>
+    <style name="Theme.TenderTrack" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:statusBarColor">@color/surface</item>
+        <item name="android:navigationBarColor">@color/background</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowBackground">@color/background</item>
+        <item name="android:windowSplashScreenBackground">@color/background</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@android:color/transparent</item>
+    </style>
+</resources>
