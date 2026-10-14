@@ -134,6 +134,11 @@ async function render() {
   let current = 0;
   let loginCreated = false;
   const errors = {};
+  // The side list lets the supplier jump between steps. Steps they have reached can be
+  // opened directly; later ones unlock as they go. "completed" holds the steps whose
+  // details were valid when the supplier last left them (shown with a tick).
+  let furthest = 0;
+  const completed = new Set();
 
   const stepsList = h('ol', { class: 'wizard-steps' });
   const panel = h('div', { class: 'card' });
@@ -153,17 +158,23 @@ async function render() {
     return '';
   }
 
+  /** What is wrong with one supporting document, or '' if nothing. */
+  function docError(name, required) {
+    const d = docs[name];
+    if (required && !d.provided) return 'This document is required.';
+    if (d.provided && d.reference.trim().length < 2) return 'Enter the document reference or number.';
+    if (d.link && !RX.url[0].test(d.link.trim())) return RX.url[1];
+    if (d.provided && d.expires && d.expires < new Date().toISOString().slice(0, 10)) {
+      return 'This document has expired. Enter the new document\'s reference and expiry date.';
+    }
+    return '';
+  }
+
   function validateDocs() {
     let ok = true;
     for (const [name, required] of DOCUMENTS) {
-      const d = docs[name];
-      d.error = '';
-      if (required && !d.provided) { d.error = 'This document is required.'; ok = false; }
-      else if (d.provided && d.reference.trim().length < 2) { d.error = 'Enter the document reference or number.'; ok = false; }
-      else if (d.link && !RX.url[0].test(d.link.trim())) { d.error = RX.url[1]; ok = false; }
-      else if (d.provided && d.expires && d.expires < new Date().toISOString().slice(0, 10)) {
-        d.error = 'This document has expired. Enter the new document\'s reference and expiry date.'; ok = false;
-      }
+      docs[name].error = docError(name, required);
+      if (docs[name].error) ok = false;
     }
     return ok;
   }
@@ -184,10 +195,68 @@ async function render() {
     return ok;
   }
 
+  /** Whether a step's details are valid, without showing any messages. */
+  function stepIsValid(i) {
+    const step = STEPS[i];
+    if (step.id === 'review') return true;
+    if (step.id === 'documents') return DOCUMENTS.every(([name, required]) => !docError(name, required));
+    return fieldsOf(step).every((f) => !validateField(f));
+  }
+
+  /** Done when the supplier moves on from a step with valid details. */
+  function leaveStep(i) {
+    if (STEPS[i].id === 'contact' && !data.email) data.email = data.contact_email;
+    if (STEPS[i].id !== 'review') completed.add(i); // the review is never "done" until submitted
+  }
+
+  /**
+   * Opens step [target]. Going back never checks anything, like the Back button.
+   * Going forward checks each step on the way, so a step cannot be skipped with
+   * missing or wrong details: the first one with a problem opens instead, with
+   * the fields to correct highlighted.
+   */
+  function goTo(target) {
+    if (target === current || target < 0 || target >= STEPS.length) return;
+    if (target < current) {
+      if (stepIsValid(current)) leaveStep(current); else completed.delete(current);
+      current = target;
+      drawPanel();
+      window.scrollTo(0, 0);
+      return;
+    }
+    const from = current;
+    for (let i = from; i < target; i += 1) {
+      if (!validateStep(i)) {
+        completed.delete(i);
+        current = i;
+        drawPanel();
+        const firstError = panel.querySelector('[aria-invalid="true"], .field-error:not([hidden])');
+        if (firstError) firstError.scrollIntoView({ block: 'center' });
+        toast(i === from ? 'Please correct the highlighted fields.' : `Please correct the highlighted fields in "${STEPS[i].title}" first.`, 'warn');
+        return;
+      }
+      leaveStep(i);
+    }
+    current = target;
+    furthest = Math.max(furthest, target);
+    drawPanel();
+    window.scrollTo(0, 0);
+  }
+
   function drawSteps() {
     clear(stepsList);
-    STEPS.forEach((s, i) => stepsList.appendChild(h('li', { class: i === current ? 'current' : i < current ? 'done' : null },
-      h('span', { class: 'no' }, i < current ? '✓' : String(i + 1)), s.title)));
+    STEPS.forEach((s, i) => {
+      const isCurrent = i === current;
+      const isDone = !isCurrent && completed.has(i);
+      const open = !isCurrent && i <= furthest;
+      const content = [h('span', { class: 'no' }, isDone ? '✓' : String(i + 1)), h('span', {}, s.title)];
+      stepsList.appendChild(h('li', { class: isCurrent ? 'current' : isDone ? 'done' : i > furthest ? 'locked' : null },
+        isCurrent
+          ? h('span', { class: 'step-link', 'aria-current': 'step' }, content)
+          : open
+            ? h('button', { class: 'step-link', type: 'button', title: `Go to ${s.title}`, onclick: () => goTo(i) }, content)
+            : h('span', { class: 'step-link', 'aria-disabled': 'true', title: 'Complete the earlier steps first' }, content)));
+    });
   }
 
   function input(f) {
@@ -260,6 +329,13 @@ async function render() {
     });
   }
 
+  /** A section title on the review step, with a link back to the step to change it. */
+  function reviewHeading(title, stepIndex) {
+    return h('div', { class: 'review-head mb' },
+      h('p', { class: 'h3' }, title),
+      h('button', { class: 'link-btn', type: 'button', onclick: () => goTo(stepIndex), 'aria-label': `Edit ${title}` }, 'Edit'));
+  }
+
   function reviewPanel() {
     const rows = [];
     for (const step of STEPS) {
@@ -271,9 +347,9 @@ async function render() {
         if (f.type === 'select' && v) { const o = f.options.find((x) => (Array.isArray(x) ? x[0] : x) === v); v = Array.isArray(o) ? o[1] : v; }
         return h('div', { class: 'kv' }, h('span', { class: 'kv-key' }, f.label), h('span', { class: 'kv-value' }, v === '' || v === undefined || v === null ? '—' : String(v)));
       });
-      if (items.length) rows.push(h('div', { class: 'mb' }, h('p', { class: 'h3 mb' }, step.title), items));
+      if (items.length) rows.push(h('div', { class: 'mb' }, reviewHeading(step.title, STEPS.indexOf(step)), items));
     }
-    rows.push(h('div', { class: 'mb' }, h('p', { class: 'h3 mb' }, 'Supporting documents'),
+    rows.push(h('div', { class: 'mb' }, reviewHeading('Supporting documents', STEPS.findIndex((x) => x.id === 'documents')),
       DOCUMENTS.map(([name]) => h('div', { class: 'kv' }, h('span', { class: 'kv-key' }, name),
         h('span', { class: 'kv-value' }, docs[name].provided ? docs[name].reference : 'Not provided')))));
     return rows;
@@ -282,7 +358,7 @@ async function render() {
   function drawPanel() {
     drawSteps();
     const step = STEPS[current];
-    const back = h('button', { class: 'btn btn-secondary', type: 'button', disabled: current === 0, onclick: () => { current -= 1; drawPanel(); window.scrollTo(0, 0); } }, 'Back');
+    const back = h('button', { class: 'btn btn-secondary', type: 'button', disabled: current === 0, onclick: () => goTo(current - 1) }, 'Back');
     const next = h('button', { class: 'btn btn-primary', type: 'submit' }, step.id === 'review' ? 'Submit registration' : 'Continue');
     let body;
     if (step.id === 'documents') body = documentsPanel();
@@ -298,17 +374,7 @@ async function render() {
       onsubmit: async (e) => {
         e.preventDefault();
         if (step.id === 'review') { await submit(next); return; }
-        if (!validateStep(current)) {
-          drawPanel();
-          const firstError = panel.querySelector('[aria-invalid="true"], .field-error:not([hidden])');
-          if (firstError) firstError.scrollIntoView({ block: 'center' });
-          toast('Please correct the highlighted fields.', 'warn');
-          return;
-        }
-        if (step.id === 'contact' && !data.email) data.email = data.contact_email;
-        current += 1;
-        drawPanel();
-        window.scrollTo(0, 0);
+        goTo(current + 1);
       },
     },
     h('p', { class: 'eyebrow' }, `Step ${current + 1} of ${STEPS.length}`),
@@ -322,7 +388,7 @@ async function render() {
 
   async function submit(button) {
     for (let i = 0; i < STEPS.length - 1; i += 1) {
-      if (!validateStep(i)) { current = i; drawPanel(); toast('Some details need attention.', 'warn'); return; }
+      if (!validateStep(i)) { completed.delete(i); current = i; drawPanel(); toast('Some details need attention.', 'warn'); return; }
     }
     const progress = h('ul', { class: 'bullets' });
     const say = (text) => progress.appendChild(h('li', {}, text));
@@ -424,6 +490,10 @@ async function render() {
         ? `${who.supplier.company_name} has an account, but its registration on this portal is not complete. Check the details below, add anything missing and submit. This is needed before bidding or registering for TenderTrack.`
         : 'Register your company here to bid for tenders. Then register for the TenderTrack app with the same account: awards are claimed there.'))),
     h('div', { class: 'wizard' }, stepsList, panel));
+  // A company finishing its registration already has most details on record, so
+  // the steps up to the first one that still needs something are open straight away.
+  for (let i = 0; i < STEPS.length - 1 && stepIsValid(i); i += 1) completed.add(i);
+  furthest = Math.min(completed.size, STEPS.length - 1);
   drawPanel();
 }
 
