@@ -96,7 +96,7 @@ class ClaimAwardViewModel(
 /**
  * Claim award: where the supplier types the 10-digit code from the award
  * email. The database compares it with its hashed copy; a correct code makes
- * the contract the supplier's and unlocks its deliverables.
+ * the contract the supplier's and opens its first phase.
  */
 @Composable
 fun ClaimAwardScreen(
@@ -156,7 +156,7 @@ private fun ClaimBody(
                 style = AppType.Body.copy(color = AppColor.InkSoft)
             )
             PrimaryButton(
-                text = "Open contract deliverables",
+                text = "Open contract phases",
                 icon = Icons.Default.TaskAlt,
                 onClick = { onOpenContract(award.tenderId) }
             )

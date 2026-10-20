@@ -18,8 +18,9 @@ import za.ac.tendertrack.ui.screens.auditor.*
  *
  * Navigation panel: every auditor screen sits in the auditor's own panel
  * (AuditorDrawer.kt), which opens with a swipe from the left edge. The main
- * screens (Dashboard, Tender Records, Compliance Reports, Audit Logs) show the
- * menu button; a tender record keeps its Back arrow, as on the officer's side.
+ * screens (Dashboard, Site checks, Tender Records, Compliance Reports, Audit
+ * Logs) show the menu button; a tender record and a single site check keep
+ * their Back arrow, as on the officer's side.
  */
 object AuditorRoutes {
     const val HOME = "auditor_home"
@@ -29,6 +30,9 @@ object AuditorRoutes {
     const val LOGS = "auditor_logs"
     /** Optional filter, so the panel can open "Needs attention" directly. */
     const val COMPLIANCE = "auditor_compliance?filter={filter}"
+    /** Contract phases waiting for the auditor's own site photo. */
+    const val SITE_CHECKS = "auditor_site_checks"
+    const val SITE_CHECK = "auditor_site_check/{deliverableId}"
 
     private const val NEEDS_ATTENTION = "attention"
 
@@ -41,6 +45,8 @@ object AuditorRoutes {
         if (needsAttention) "auditor_compliance?filter=$NEEDS_ATTENTION" else "auditor_compliance"
 
     fun record(id: String) = "auditor_record/$id"
+
+    fun siteCheck(deliverableId: String) = "auditor_site_check/$deliverableId"
 
     fun isAuditorRoute(route: String?): Boolean = route?.startsWith("auditor_") == true
 
@@ -76,7 +82,26 @@ fun NavGraphBuilder.auditorGraph(
             onOpenLogs = { navController.navigate(AuditorRoutes.LOGS) },
             onOpenCompliance = { navController.navigate(AuditorRoutes.compliance()) },
             onSignOut = onSignOut,
+            onMenu = openDrawer,
+            onOpenSiteChecks = { navController.navigate(AuditorRoutes.SITE_CHECKS) }
+        )
+    }
+
+    screen(AuditorRoutes.SITE_CHECKS) { _, openDrawer ->
+        SiteChecksScreen(
+            onOpen = { id -> navController.navigate(AuditorRoutes.siteCheck(id)) },
+            onBack = { navController.popBackStack() },
             onMenu = openDrawer
+        )
+    }
+
+    screen(
+        route = AuditorRoutes.SITE_CHECK,
+        arguments = listOf(navArgument("deliverableId") { type = NavType.StringType })
+    ) { entry, _ ->
+        SiteCheckScreen(
+            deliverableId = entry.arguments?.getString("deliverableId").orEmpty(),
+            onBack = { navController.popBackStack() }
         )
     }
 

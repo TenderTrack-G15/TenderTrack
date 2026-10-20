@@ -153,12 +153,23 @@ private fun AwardCard(award: SupplierAward, onClaim: (String) -> Unit, onOpenCon
                 )
                 Spacer(Modifier.height(Dimens.SpaceSm))
                 ProgressBar(award.progress)
+                Spacer(Modifier.height(Dimens.SpaceSm))
+                Text(award.currentPhaseLine, style = AppType.KvValue)
                 Spacer(Modifier.height(Dimens.SpaceMd))
-                SecondaryButton(
-                    text = "Update deliverables",
-                    icon = Icons.Default.TaskAlt,
-                    onClick = { onOpenContract(award.tenderId) }
-                )
+                val photoNeeded = award.currentPhaseState == PhaseState.TO_DO || award.currentPhaseState == PhaseState.RETURNED
+                if (photoNeeded) {
+                    PrimaryButton(
+                        text = "Take phase photo",
+                        icon = Icons.Default.PhotoCamera,
+                        onClick = { onOpenContract(award.tenderId) }
+                    )
+                } else {
+                    SecondaryButton(
+                        text = "Contract phases",
+                        icon = Icons.Default.TaskAlt,
+                        onClick = { onOpenContract(award.tenderId) }
+                    )
+                }
             }
             AwardClaimStatus.EXPIRED, AwardClaimStatus.LOCKED -> NoteBanner(
                 text = if (award.claimStatus == AwardClaimStatus.LOCKED)

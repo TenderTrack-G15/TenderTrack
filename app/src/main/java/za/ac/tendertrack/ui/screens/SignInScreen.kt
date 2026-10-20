@@ -1,11 +1,11 @@
 package za.ac.tendertrack.ui.screens
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Login
 import androidx.compose.material.icons.filled.*
 import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.lifecycle.ViewModel
@@ -26,6 +26,11 @@ import za.ac.tendertrack.data.repo.AuthRepository
 import za.ac.tendertrack.data.repo.SIGN_IN_ROLES
 import za.ac.tendertrack.data.repo.SUSPENDED_MESSAGE
 import za.ac.tendertrack.ui.components.*
+import za.ac.tendertrack.ui.screens.account.MAX_WRONG_CODES
+import za.ac.tendertrack.ui.screens.account.TwoFactorGate
+import za.ac.tendertrack.ui.screens.account.TwoFactorStep
+import za.ac.tendertrack.ui.screens.account.TwoFactorUi
+import za.ac.tendertrack.ui.screens.account.twoFactorProblem
 import za.ac.tendertrack.ui.theme.AppColor
 import za.ac.tendertrack.ui.theme.Dimens
 import za.ac.tendertrack.ui.viewModelFactory
@@ -92,16 +97,22 @@ data class SignInUiState(
     val emailError: String? = null,
     val passwordError: String? = null,
     val formError: String? = null,
-    val submitting: Boolean = false
+    val submitting: Boolean = false,
+    /** Set after a correct password while the 6-digit code is still needed. */
+    val twoFactor: TwoFactorUi? = null
 )
 
 class SignInViewModel(
     private val audience: SignInAudience,
-    private val authRepository: AuthRepository = ServiceLocator.authRepository
+    private val authRepository: AuthRepository = ServiceLocator.authRepository,
+    private val gate: TwoFactorGate = TwoFactorGate()
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(SignInUiState())
     val state: StateFlow<SignInUiState> = _state.asStateFlow()
+
+    /** The account whose password was right, waiting for its code. */
+    private var pendingProfile: Profile? = null
 
     fun onEmail(value: String) = _state.update { it.copy(email = value.trim(), emailError = null, formError = null) }
     fun onPassword(value: String) = _state.update { it.copy(password = value, passwordError = null, formError = null) }
@@ -123,9 +134,21 @@ class SignInViewModel(
                 val refusal = signInRefusal(audience, profile.role)
                 if (refusal != null) {
                     refuse(refusal)
-                } else {
+                    return@launch
+                }
+                // Officers, suppliers and auditors then type the code from their authenticator app.
+                val step = try {
+                    gate.begin(profile.role)
+                } catch (e: Exception) {
+                    refuse(e.twoFactorProblem())
+                    return@launch
+                }
+                if (step == null) {
                     _state.update { it.copy(submitting = false) }
                     onSuccess(profile)
+                } else {
+                    pendingProfile = profile
+                    _state.update { it.copy(submitting = false, password = "", twoFactor = step) }
                 }
             } catch (e: Exception) {
                 // Supabase says "User is banned" for an account the administrator
@@ -140,6 +163,44 @@ class SignInViewModel(
     private suspend fun refuse(message: String) {
         authRepository.signOut()
         _state.update { it.copy(submitting = false, formError = message) }
+    }
+
+    // -- The 6-digit code ---------------------------------------------------------
+
+    fun onCode(value: String) = _state.update {
+        it.copy(twoFactor = it.twoFactor?.copy(code = TwoFactorGate.normalise(value), error = null))
+    }
+
+    fun submitCode(onSuccess: (Profile) -> Unit) {
+        val step = _state.value.twoFactor ?: return
+        if (step.submitting) return
+        _state.update { it.copy(twoFactor = step.copy(submitting = true, error = null)) }
+        viewModelScope.launch {
+            val wrong = gate.check(step)
+            when {
+                wrong == null -> {
+                    val profile = pendingProfile
+                    pendingProfile = null
+                    _state.update { it.copy(twoFactor = null) }
+                    if (profile != null) onSuccess(profile)
+                }
+                wrong.wrongCodes >= MAX_WRONG_CODES -> {
+                    pendingProfile = null
+                    authRepository.signOut()
+                    _state.update {
+                        it.copy(twoFactor = null, formError = "Too many wrong codes. You have been signed out: sign in again to try again.")
+                    }
+                }
+                else -> _state.update { it.copy(twoFactor = wrong.copy(submitting = false)) }
+            }
+        }
+    }
+
+    /** Leaves the code step: the half-finished sign-in is signed out. */
+    fun cancelCode() {
+        pendingProfile = null
+        _state.update { it.copy(twoFactor = null, formError = null) }
+        viewModelScope.launch { runCatching { authRepository.signOut() } }
     }
 }
 
@@ -169,7 +230,24 @@ fun SignInScreen(
     )
     val state by viewModel.state.collectAsState()
 
-    AppScaffold(title = audience.title, onBack = onBack) {
+    // During the code step, Back cancels the sign-in rather than leaving a half-signed-in session.
+    BackHandler(enabled = state.twoFactor != null) { viewModel.cancelCode() }
+
+    AppScaffold(
+        title = audience.title,
+        onBack = { if (state.twoFactor != null) viewModel.cancelCode() else onBack() }
+    ) {
+        val step = state.twoFactor
+        if (step != null) {
+            TwoFactorStep(
+                step = step,
+                onCode = viewModel::onCode,
+                onSubmit = { viewModel.submitCode(onSignedIn) },
+                onCancel = viewModel::cancelCode
+            )
+            return@AppScaffold
+        }
+
         ScreenHeading(
             eyebrow = audience.eyebrow,
             title = audience.heading,
@@ -212,9 +290,9 @@ fun SignInScreen(
         TextAction(text = audience.switchLabel, color = AppColor.Muted, onClick = onSwitchAudience)
 
         NoteBanner(
-            title = "Role is not selected here",
-            text = "Your permissions come from the role assigned to your account and are applied to every " +
-                "request by the database. Only an administrator can change a role, in the admin portal.",
+            title = "Two-factor sign-in",
+            text = "After your password, you type a 6-digit code from an authenticator app. The first time, you add " +
+                "TenderTrack to the app. Your role comes from your account and is applied by the database to every request.",
             tone = NoteTone.Neutral,
             icon = Icons.Default.Shield
         )
@@ -224,12 +302,12 @@ fun SignInScreen(
             NoteBanner(
                 title = "Running on sample data",
                 text = if (audience == SignInAudience.GOVERNMENT)
-                    "Any password of 8 characters or more works. An email starting with \"auditor\" opens the " +
-                        "Auditor screens; any other email opens the Procurement Officer screens. Administrators " +
-                        "use the admin portal instead."
+                    "Any password of 8 characters or more works, then the code 123456. An email starting with " +
+                        "\"auditor\" opens the Auditor screens; any other email opens the Procurement Officer " +
+                        "screens. Administrators use the admin portal instead."
                 else
-                    "Any password of 8 characters or more works. An email starting with \"supplier\", or one " +
-                        "you signed up with, opens the Supplier screens.",
+                    "Any password of 8 characters or more works, then the code 123456. An email starting with " +
+                        "\"supplier\", or one you signed up with, opens the Supplier screens.",
                 tone = NoteTone.Info,
                 icon = Icons.Default.Info
             )

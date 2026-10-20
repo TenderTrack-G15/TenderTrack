@@ -19,6 +19,7 @@ import za.ac.tendertrack.core.UiState
 import za.ac.tendertrack.data.ServiceLocator
 import za.ac.tendertrack.data.model.*
 import za.ac.tendertrack.data.repo.AuditorRepository
+import za.ac.tendertrack.data.repo.PhaseRepository
 import za.ac.tendertrack.ui.components.*
 import za.ac.tendertrack.ui.theme.AppType
 import za.ac.tendertrack.ui.theme.Dimens
@@ -27,7 +28,9 @@ import za.ac.tendertrack.ui.theme.Dimens
 data class AuditorSummary(
     val records: List<TenderRecord>,
     val reports: List<ComplianceReport>,
-    val logEntries: Int
+    val logEntries: Int,
+    /** Contract phases waiting for the auditor's site photo (null if they could not be read). */
+    val siteChecksWaiting: Int? = null
 ) {
     val awarded: Int get() = records.count { it.awardedAt != null }
     val open: Int get() = records.count { it.status == TenderStatus.PUBLISHED }
@@ -37,7 +40,8 @@ data class AuditorSummary(
 }
 
 class AuditorHomeViewModel(
-    private val repository: AuditorRepository = ServiceLocator.auditorRepository
+    private val repository: AuditorRepository = ServiceLocator.auditorRepository,
+    private val phases: PhaseRepository = PhaseRepository.instance
 ) : ViewModel() {
 
     private val _state = MutableStateFlow<UiState<AuditorSummary>>(UiState.Loading)
@@ -51,7 +55,8 @@ class AuditorHomeViewModel(
                     AuditorSummary(
                         records = repository.tenderRecords(),
                         reports = repository.complianceReports(),
-                        logEntries = repository.auditLogs().size
+                        logEntries = repository.auditLogs().size,
+                        siteChecksWaiting = runCatching { phases.siteCheckQueue().waiting.size }.getOrNull()
                     )
                 )
             } catch (e: Exception) {
@@ -62,9 +67,9 @@ class AuditorHomeViewModel(
 }
 
 /**
- * The Auditor's home screen. The Auditor observes and verifies: every screen
- * below is read-only, and the account has no permission to create, change or
- * delete any record.
+ * The Auditor's home screen. The Auditor observes and verifies: every record is
+ * read-only. The one thing an auditor adds is a site photo, confirming the
+ * photo a supplier took of a contract phase (Site checks).
  */
 @Composable
 fun AuditorHomeScreen(
@@ -75,6 +80,8 @@ fun AuditorHomeScreen(
     onSignOut: () -> Unit,
     /** Opens the auditor's navigation panel; the menu button shows when it is given. */
     onMenu: (() -> Unit)? = null,
+    /** Opens Site checks: contract phases waiting for the auditor's own photo. */
+    onOpenSiteChecks: (() -> Unit)? = null,
     viewModel: AuditorHomeViewModel = viewModel()
 ) {
     val state by viewModel.state.collectAsState()
@@ -94,12 +101,25 @@ fun AuditorHomeScreen(
             title = "Audit and verification",
             subtitle = "Signed in as $auditorName · read-only across every record"
         )
+        AnnouncementsBanner(AnnouncementViewer.STAFF)
 
         when (val result = state) {
             is UiState.Loading -> LoadingState(message = "Loading records…")
             is UiState.Error -> ErrorState(result.message, onRetry = viewModel::load)
             is UiState.Success -> {
                 val summary = result.data
+
+                if (onOpenSiteChecks != null && summary.siteChecksWaiting != null) {
+                    SectionHeader("Site checks")
+                    val waiting = summary.siteChecksWaiting
+                    StatTile(
+                        "Phases waiting for your site photo", "$waiting",
+                        Modifier.fillMaxWidth(),
+                        if (waiting > 0) "Visit the site and take your own photo" else "Nothing waiting",
+                        alert = waiting > 0, onClick = onOpenSiteChecks
+                    )
+                    SecondaryButton(text = "Open site checks", icon = Icons.Default.PhotoCamera, onClick = onOpenSiteChecks)
+                }
 
                 SectionHeader("Tender records")
                 Column(verticalArrangement = Arrangement.spacedBy(Dimens.GridGap)) {
@@ -147,7 +167,7 @@ fun AuditorHomeScreen(
                 NoteBanner(
                     title = "What an auditor cannot do",
                     text = "Create or edit tenders, submit bids, award contracts, approve payments or delete " +
-                        "records. The database gives this account no write permission at all.",
+                        "records. The only thing this account can add is a site photo with a note, under Site checks.",
                     tone = NoteTone.Neutral,
                     icon = Icons.Default.Shield
                 )

@@ -316,3 +316,12 @@ td.num, th.num { text-align: right; white-space: nowrap; }
 .mt-sm { margin-top: 4px; }
 .req { color: var(--danger-ink); }
 .footer-version { margin-top: 6px; opacity: 0.6; font-size: 12px; }
+
+/* Two-factor sign-in */
+.signin-steps { display: flex; gap: 8px; margin-bottom: 12px; font-size: 12px; font-weight: 600; color: var(--muted); }
+.signin-steps span { padding: 4px 10px; border-radius: 999px; background: var(--neutral-bg); border: 1px solid var(--line); }
+.signin-steps span.on { background: #EEF2FF; border-color: #C7D2FE; color: #312E81; }
+.qr-box { display: flex; justify-content: center; margin: 14px 0; }
+.qr-box img { width: 188px; height: 188px; background: #FFFFFF; border: 1px solid var(--line); border-radius: var(--radius); padding: 8px; }
+.secret-key { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 15px; font-weight: 700; letter-spacing: 1px; color: var(--ink); word-break: break-all; margin: 4px 0 8px; }
+.code-input { font-size: 20px; letter-spacing: 6px; font-weight: 700; max-width: 200px; }

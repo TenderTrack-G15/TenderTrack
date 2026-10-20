@@ -10,7 +10,9 @@ import kotlinx.serialization.Serializable
  * one-time 10-digit award code, keeps only a scrambled (hashed) copy, and the
  * portal emails the code to the company. The company claims the award by
  * entering the code in TenderTrack. Until then it cannot start the contract
- * or update its deliverables — the database refuses both.
+ * or photograph its phases — the database refuses both.
+ *
+ * The contract's five phases and their photo proof are in PhaseModels.kt.
  */
 
 /** Where the award code is, as supplier_awards() reports it. */
@@ -49,7 +51,12 @@ data class SupplierAward(
     @SerialName("sent_to") val sentTo: String = "",
     @SerialName("deliverables_total") val deliverablesTotal: Int = 0,
     @SerialName("deliverables_verified") val deliverablesVerified: Int = 0,
-    @SerialName("deliverables_awaiting") val deliverablesAwaiting: Int = 0
+    @SerialName("deliverables_awaiting") val deliverablesAwaiting: Int = 0,
+    /** The phase being worked on now: the first one not yet verified. Null when all are done. */
+    @SerialName("current_phase_no") val currentPhaseNo: Int? = null,
+    @SerialName("current_phase_name") val currentPhaseName: String? = null,
+    @SerialName("current_phase_state") val currentPhaseState: PhaseState? = null,
+    @SerialName("phases_payment_approved") val phasesPaymentApproved: Int = 0
 ) {
     val isClaimed: Boolean get() = claimStatus == AwardClaimStatus.CLAIMED
     val canEnterCode: Boolean get() = claimStatus == AwardClaimStatus.PENDING
@@ -57,6 +64,15 @@ data class SupplierAward(
     /** Share of the contract's phases the department has verified, 0..1. */
     val progress: Float
         get() = if (deliverablesTotal == 0) 0f else deliverablesVerified.toFloat() / deliverablesTotal
+
+    /** "Phase 2 of 5 · Execution: photo needed", or that every phase is verified. */
+    val currentPhaseLine: String
+        get() = when {
+            deliverablesTotal == 0 -> "The contract's phases are being set up."
+            currentPhaseNo == null -> "All $deliverablesTotal phases verified"
+            else -> "Phase $currentPhaseNo of $deliverablesTotal · $currentPhaseName" +
+                (currentPhaseState?.let { ": ${it.supplierLabel.replaceFirstChar { c -> c.lowercase() }}" } ?: "")
+        }
 }
 
 /**
@@ -71,46 +87,6 @@ data class ClaimResult(
     val locked: Boolean = false,
     val expired: Boolean = false
 )
-
-/** A contract phase's state. Same values as the deliverable_status type. */
-@Serializable
-enum class ContractPhaseStatus {
-    @SerialName("not_started") NOT_STARTED,
-    @SerialName("awaiting_verification") AWAITING_VERIFICATION,
-    @SerialName("verified") VERIFIED,
-    @SerialName("overdue") OVERDUE;
-
-    /** Wording for the supplier doing the work. */
-    val displayName: String get() = when (this) {
-        NOT_STARTED -> "Not started"
-        AWAITING_VERIFICATION -> "Evidence submitted"
-        VERIFIED -> "Verified"
-        OVERDUE -> "Overdue"
-    }
-}
-
-/** One phase of an awarded contract, from the `deliverables` table. */
-@Serializable
-data class ContractDeliverable(
-    val id: String,
-    @SerialName("tender_id") val tenderId: String,
-    @SerialName("phase_name") val phaseName: String,
-    @SerialName("target_date") val targetDate: String,
-    @SerialName("phase_value") val phaseValue: Double = 0.0,
-    val status: ContractPhaseStatus = ContractPhaseStatus.NOT_STARTED,
-    @SerialName("evidence_url") val evidenceUrl: String? = null,
-    @SerialName("evidence_note") val evidenceNote: String? = null,
-    @SerialName("evidence_at") val evidenceAt: String? = null,
-    @SerialName("verified_at") val verifiedAt: String? = null
-) {
-    /** The officer sent the evidence back; the reason starts the note. */
-    val wasReturned: Boolean
-        get() = status != ContractPhaseStatus.VERIFIED && evidenceNote?.startsWith("Returned:") == true
-
-    /** The supplier may (re)submit evidence for this phase. */
-    val canSubmit: Boolean
-        get() = status == ContractPhaseStatus.NOT_STARTED || status == ContractPhaseStatus.OVERDUE
-}
 
 /** The award code as the supplier types it. The database checks it again. */
 object AwardCodeInput {
@@ -132,17 +108,5 @@ object AwardCodeInput {
     fun pretty(raw: String): String {
         val d = clean(raw)
         return if (d.length > 5) d.substring(0, 5) + " " + d.substring(5) else d
-    }
-}
-
-/** Evidence for one phase: a link, a description, or both. */
-data class EvidenceForm(val link: String = "", val note: String = "") {
-    fun errors(): Map<String, String> = buildMap {
-        val url = link.trim()
-        if (url.isEmpty() && note.isBlank()) put("link", "Add a link to the evidence, or describe what was delivered.")
-        if (url.isNotEmpty() && !Regex("^https?://\\S+$", RegexOption.IGNORE_CASE).matches(url)) {
-            put("link", "The link must start with http:// or https://")
-        }
-        if (note.length > 1000) put("note", "Keep the description under 1000 characters.")
     }
 }

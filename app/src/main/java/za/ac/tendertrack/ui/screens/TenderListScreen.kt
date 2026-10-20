@@ -1,5 +1,6 @@
 package za.ac.tendertrack.ui.screens
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
@@ -23,10 +24,14 @@ import za.ac.tendertrack.core.Format
 import za.ac.tendertrack.core.UiState
 import za.ac.tendertrack.core.friendlyMessage
 import za.ac.tendertrack.data.ServiceLocator
+import za.ac.tendertrack.data.model.OfficerAlerts
 import za.ac.tendertrack.data.model.Tender
+import za.ac.tendertrack.data.model.TenderAlert
 import za.ac.tendertrack.data.model.TenderStatus
+import za.ac.tendertrack.data.repo.OfficerAlertsStore
 import za.ac.tendertrack.data.repo.TenderRepository
 import za.ac.tendertrack.ui.components.*
+import za.ac.tendertrack.ui.screens.phases.badgeTone
 import za.ac.tendertrack.ui.theme.AppColor
 import za.ac.tendertrack.ui.theme.AppType
 import za.ac.tendertrack.ui.theme.Dimens
@@ -59,6 +64,9 @@ class TenderListViewModel(
     private val _state = MutableStateFlow(TenderListUiState())
     val state: StateFlow<TenderListUiState> = _state.asStateFlow()
 
+    /** Each tender's alerts, shown on its card (the bell no longer carries tender notices). */
+    val alerts: StateFlow<OfficerAlerts?> = OfficerAlertsStore.alerts
+
     init { load() }
 
     fun load() {
@@ -71,21 +79,28 @@ class TenderListViewModel(
             }
             _state.update { it.copy(tenders = result) }
         }
+        viewModelScope.launch { OfficerAlertsStore.refresh() }
     }
 
     fun onQueryChange(value: String) = _state.update { it.copy(query = value) }
     fun onStatusFilter(status: TenderStatus?) = _state.update { it.copy(statusFilter = status) }
 }
 
-/** All tenders, with search and status filters, and the entry point to Register. */
+/**
+ * All tenders, with search and status filters, and the entry point to Register.
+ * Each card shows that tender's alerts; a phase alert opens its Phase checks.
+ */
 @Composable
 fun TenderListScreen(
     onMenu: () -> Unit,
     onOpenTender: (String) -> Unit,
     onRegisterTender: () -> Unit,
+    /** Opens Phase checks for one tender. Without it, a phase alert opens the tender. */
+    onOpenPhaseChecks: ((String) -> Unit)? = null,
     viewModel: TenderListViewModel = viewModel()
 ) {
     val state by viewModel.state.collectAsState()
+    val alerts by viewModel.alerts.collectAsState()
 
     AppScaffold(
         title = "All Tenders",
@@ -102,11 +117,7 @@ fun TenderListScreen(
             Modifier.horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(Dimens.SpaceSm)
         ) {
-            FilterChip(
-                text = "All",
-                selected = state.statusFilter == null,
-                onClick = { viewModel.onStatusFilter(null) }
-            )
+            FilterChip(text = "All", selected = state.statusFilter == null, onClick = { viewModel.onStatusFilter(null) })
             TenderStatus.lifecycle.forEach { status ->
                 FilterChip(
                     text = status.displayName,
@@ -138,7 +149,15 @@ fun TenderListScreen(
                 } else {
                     Column(verticalArrangement = Arrangement.spacedBy(Dimens.ListGap)) {
                         visible.forEach { tender ->
-                            TenderCard(tender) { onOpenTender(tender.id) }
+                            TenderCard(
+                                tender = tender,
+                                alerts = alerts?.forTender(tender.id).orEmpty(),
+                                onAlert = { alert ->
+                                    if (alert.isPhaseAlert && onOpenPhaseChecks != null) onOpenPhaseChecks(tender.id)
+                                    else onOpenTender(tender.id)
+                                },
+                                onOpenPhases = onOpenPhaseChecks?.let { open -> { open(tender.id) } }
+                            ) { onOpenTender(tender.id) }
                         }
                     }
                 }
@@ -150,15 +169,38 @@ fun TenderListScreen(
     }
 }
 
-/** One tender in a list. Used on this screen and on Record Payment. */
+/**
+ * One tender in a list. Used on this screen and on Record Payment. [alerts] are
+ * the tender's notices (photos to compare, payment to approve, closing date
+ * passed…), shown at the top of the card; tapping one calls [onAlert].
+ * [onOpenPhases] adds "Contract phases and photos" to an awarded contract.
+ */
 @Composable
-fun TenderCard(tender: Tender, onClick: () -> Unit) {
-    AppCard(onClick = onClick) {
+fun TenderCard(
+    tender: Tender,
+    alerts: List<TenderAlert> = emptyList(),
+    onAlert: ((TenderAlert) -> Unit)? = null,
+    onOpenPhases: (() -> Unit)? = null,
+    onClick: () -> Unit
+) {
+    AppCard(onClick = onClick, accent = if (alerts.any { it.tone == "danger" }) AppColor.DangerBar else null) {
         CardHeader(
             title = tender.referenceNumber,
             subtitle = "${tender.title} · ${tender.department}",
             trailing = { StatusBadge(tender.status.displayName, tender.status.tone()) }
         )
+        if (alerts.isNotEmpty()) {
+            Spacer(Modifier.height(10.dp))
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                alerts.forEach { alert ->
+                    StatusBadge(
+                        text = alert.label,
+                        tone = alert.badgeTone(),
+                        modifier = if (onAlert != null) Modifier.clickable { onAlert(alert) } else Modifier
+                    )
+                }
+            }
+        }
         Spacer(Modifier.height(10.dp))
         KeyValueRow("Estimated budget", Format.money(tender.estimatedBudget))
         if (tender.awardedValue != null) {
@@ -190,6 +232,12 @@ fun TenderCard(tender: Tender, onClick: () -> Unit) {
                 tender.utilisation,
                 color = if (tender.utilisation >= 1f) AppColor.SuccessBar else AppColor.WarnBar
             )
+        }
+        val hasContract = tender.status == TenderStatus.AWARDED || tender.status == TenderStatus.IN_PROGRESS ||
+            tender.status == TenderStatus.COMPLETED
+        if (onOpenPhases != null && hasContract) {
+            Spacer(Modifier.height(4.dp))
+            TextAction(text = "Contract phases and photos", color = AppColor.InfoInk, onClick = onOpenPhases)
         }
     }
 }

@@ -33,6 +33,7 @@ import za.ac.tendertrack.data.ServiceLocator
 import za.ac.tendertrack.data.model.Profile
 import za.ac.tendertrack.data.model.TenderStatus
 import za.ac.tendertrack.data.repo.AuditorRepository
+import za.ac.tendertrack.data.repo.PhaseRepository
 import za.ac.tendertrack.ui.components.*
 import za.ac.tendertrack.ui.theme.AppColor
 import za.ac.tendertrack.ui.theme.AppType
@@ -40,20 +41,23 @@ import za.ac.tendertrack.ui.theme.Dimens
 
 /*
  * The auditor's navigation panel: the same look as the procurement officer's
- * drawer (AppDrawer.kt), with the auditor's own destinations. Everything in it
- * is read-only, like the rest of the auditor's screens. It lives in the
- * auditor graph, so NavGraph.kt needs no changes; the officer's drawer stays
- * closed on "auditor_" routes as before.
+ * drawer (AppDrawer.kt), with the auditor's own destinations. Everything is
+ * read-only except Site checks, where the auditor adds their own photo of a
+ * contract phase. It lives in the auditor graph, so NavGraph.kt needs no
+ * changes; the officer's drawer stays closed on "auditor_" routes as before.
  */
 
-/** The count shown next to Compliance reports. */
+/** The counts shown in the panel. */
 data class AuditorDrawerInfo(
     /** Tenders with at least one compliance check not met. */
-    val tendersWithProblem: Int = 0
+    val tendersWithProblem: Int = 0,
+    /** Contract phases with a supplier photo waiting for the auditor's site photo. */
+    val siteChecksWaiting: Int = 0
 )
 
 class AuditorDrawerViewModel(
-    private val repository: AuditorRepository = ServiceLocator.auditorRepository
+    private val repository: AuditorRepository = ServiceLocator.auditorRepository,
+    private val phases: PhaseRepository = PhaseRepository.instance
 ) : ViewModel() {
 
     private val _info = MutableStateFlow(AuditorDrawerInfo())
@@ -62,9 +66,13 @@ class AuditorDrawerViewModel(
     /** Called when the panel opens, so the count is current without slowing every screen down. */
     fun refresh() {
         viewModelScope.launch {
-            // If the reports can't be read, the panel keeps the last count rather than showing an error.
-            val reports = runCatching { repository.complianceReports() }.getOrNull() ?: return@launch
-            _info.value = AuditorDrawerInfo(tendersWithProblem = reports.count { !it.compliant })
+            // If something can't be read, the panel keeps the last count rather than showing an error.
+            val reports = runCatching { repository.complianceReports() }.getOrNull()
+            val waiting = runCatching { phases.siteCheckQueue().waiting.size }.getOrNull()
+            _info.value = AuditorDrawerInfo(
+                tendersWithProblem = reports?.count { !it.compliant } ?: _info.value.tendersWithProblem,
+                siteChecksWaiting = waiting ?: _info.value.siteChecksWaiting
+            )
         }
     }
 }
@@ -152,7 +160,7 @@ private fun AuditorDrawer(
                 Text("TenderTrack", style = AppType.H2.copy(fontSize = 19.sp))
             }
             Text(
-                "Auditor · read-only",
+                "Auditor · observe and verify",
                 style = AppType.Meta,
                 modifier = Modifier.padding(start = Dimens.ScreenPadding + 32.dp, end = Dimens.ScreenPadding, bottom = 14.dp)
             )
@@ -165,6 +173,14 @@ private fun AuditorDrawer(
                 DrawerItem("Dashboard", Icons.Default.BarChart, currentRoute == AuditorRoutes.HOME) {
                     onNavigate(AuditorRoutes.HOME)
                 }
+
+                DrawerGroup("Contract phases")
+                DrawerItem(
+                    "Site checks", Icons.Default.PhotoCamera,
+                    currentRoute == AuditorRoutes.SITE_CHECKS || currentRoute == AuditorRoutes.SITE_CHECK,
+                    badge = info.siteChecksWaiting,
+                    badgeTone = BadgeTone.Warning
+                ) { onNavigate(AuditorRoutes.SITE_CHECKS) }
 
                 DrawerGroup("Tender records")
                 DrawerItem("All tender records", Icons.Default.Description, currentRoute == AuditorRoutes.RECORDS) {
