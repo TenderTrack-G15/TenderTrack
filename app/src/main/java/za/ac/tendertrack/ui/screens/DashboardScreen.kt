@@ -62,11 +62,13 @@ class DashboardViewModel(
  * Counts use the tender lifecycle vocabulary only, and the screen carries the
  * budget, fund-utilisation and flagged-compliance tiles the review asked for.
  *
- * Notices about tenders appear on the tiles, not under the bell: the In progress
- * tile counts phases waiting for the officer (photos to compare, payments to
- * approve), and Registrations to verify counts companies that sent new
- * documents. Each tender's own alerts are on its card in All Tenders. The bell
- * keeps everything else.
+ * Notices about tenders appear on the tiles, not under the bell: the Open for
+ * bids tile counts bids submitted or changed on the eTender portal (with their
+ * documents) and tenders past their closing date, the In progress tile counts
+ * phases waiting for the officer (photos to compare, payments to approve), and
+ * Registrations to verify counts companies that sent new documents. Each
+ * tender's own alerts are on its card in All Tenders. The bell keeps
+ * everything else.
  */
 @Composable
 fun DashboardScreen(
@@ -134,6 +136,7 @@ private fun ColumnScope.DashboardContent(
     val totals = alerts?.totals
     val phaseActions = alerts?.officerActions ?: 0
     val closingPassed = totals?.closingPassed ?: 0
+    val newBids = totals?.newBids ?: 0
     val newDocuments = totals?.newDocuments ?: 0
 
     // The tiles are laid out as plain rows of two. Your project's Kotlin and Compose
@@ -150,9 +153,8 @@ private fun ColumnScope.DashboardContent(
                 )
                 AlertTile(
                     "Open for bids", "${summary.count(TenderStatus.PUBLISHED)}", Modifier.weight(1f),
-                    if (closingPassed > 0) "$closingPassed past closing: close bidding"
-                    else "${summary.closingWithin30Days} close in 30 days",
-                    alertCount = closingPassed, onClick = onOpenTenders
+                    openForBidsFootnote(newBids, closingPassed, summary.closingWithin30Days),
+                    alertCount = newBids + closingPassed, onClick = onOpenTenders
                 )
             }
             Row(horizontalArrangement = Arrangement.spacedBy(Dimens.GridGap)) {
@@ -228,6 +230,15 @@ private fun ColumnScope.DashboardContent(
             "items are waiting for you there.",
         style = AppType.Tiny
     )
+}
+
+/** "1 new bid to check · 1 past closing", or how many close soon. */
+private fun openForBidsFootnote(newBids: Int, closingPassed: Int, closingSoon: Int): String {
+    val parts = buildList {
+        if (newBids > 0) add("$newBids new ${if (newBids == 1) "bid" else "bids"} to check")
+        if (closingPassed > 0) add("$closingPassed past closing")
+    }
+    return if (parts.isNotEmpty()) parts.joinToString(" · ") else "$closingSoon close in 30 days"
 }
 
 /** "2 to compare · 1 to pay", or what the auditor is still doing. */

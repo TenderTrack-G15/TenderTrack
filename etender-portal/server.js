@@ -10,7 +10,9 @@
  *   2. Registers a new supplier's login, and records the company as
  *      registered on the portal once its registration is complete (both need
  *      Supabase's secret key, which never reaches the browser).
- *   3. Delivers the database's email outbox: award codes and bid receipts.
+ *   3. Delivers the database's email outbox: award codes and bid receipts,
+ *      each email once (it is claimed in the database before it is sent, so
+ *      two portals running at the same time never both send it).
  *      With SMTP settings in .env it sends real emails (for example through
  *      Gmail); without them it keeps them in a demo mailbox on this computer.
  *   4. Shows a signed-in supplier the demo mailbox messages meant for them.
@@ -51,7 +53,7 @@ function loadEnv(file) {
 
 const ROOT = __dirname;
 /** Shown in the page footer and when the server starts, to check which files are running. */
-const PORTAL_VERSION = '2026-10-20';
+const PORTAL_VERSION = '2026-10-20.2';
 const ENV = { ...loadEnv(path.join(ROOT, '.env')), ...process.env };
 const PORT = Number(ENV.PORTAL_PORT || 5070);
 const HOST = '127.0.0.1'; // loopback only — deliberately not configurable
@@ -459,42 +461,86 @@ function writeMailbox(messages) {
 
 let outboxRunning = false;
 let lastOutboxError = '';
+/** False when the database has no claim_email_outbox yet (portal_fixes.sql not run). */
+let claimSupported = true;
+/** This portal's name in the outbox, so a claimed email shows which computer sent it. */
+const WORKER = `${require('node:os').hostname()}-${process.pid}`.slice(0, 80);
 
-/** Sends everything waiting in the database's email outbox. */
+/**
+ * The next waiting email, claimed for this portal only. Several portals can
+ * run at once against the same Supabase project (for example on each
+ * teammate's laptop); the database hands each waiting email to exactly one of
+ * them, so it is sent once. Returns undefined when the database cannot claim
+ * yet, and the older way is used.
+ */
+async function claimNextEmail() {
+  if (!claimSupported) return undefined;
+  try {
+    const rows = await restAsServer('POST', 'rpc/claim_email_outbox', { p_worker: WORKER, p_limit: 1 });
+    return Array.isArray(rows) && rows.length ? rows[0] : null;
+  } catch (error) {
+    if (!/claim_email_outbox|PGRST202|Could not find the function/i.test(error.message)) throw error;
+    claimSupported = false;
+    log('The database cannot claim emails yet: run supabase/portal_fixes.sql in Supabase. Until then, two portals '
+      + 'running at the same time may both send the same email.');
+    return undefined;
+  }
+}
+
+/** Sends one email from the outbox and records the result. */
+async function deliver(item) {
+  const mail = { to: item.to_email, toName: item.to_name, subject: item.subject, text: item.body };
+  try {
+    let via;
+    if (SMTP.enabled && mayEmail(item.to_email)) {
+      await smtpSend(mail);
+      via = 'smtp';
+    } else {
+      const box = readMailbox();
+      if (!box.some((m) => m.id === item.id)) {
+        box.push({ id: item.id, to: item.to_email, toName: item.to_name, toUser: item.to_user || null,
+                   subject: item.subject, body: item.body, kind: item.kind, receivedAt: new Date().toISOString() });
+        writeMailbox(box);
+      }
+      via = 'demo-mailbox';
+    }
+    // The award code leaves the database once it is delivered.
+    await restAsServer('PATCH', `email_outbox?id=eq.${item.id}`,
+      { sent_at: new Date().toISOString(), delivered_via: via, body: item.body_after_send, last_error: null },
+      { Prefer: 'return=minimal' });
+    log(`email to ${maskEmail(item.to_email)} (${item.kind}) via ${via}`);
+    return true;
+  } catch (error) {
+    const attempts = (item.attempts || 0) + 1;
+    const update = { attempts, last_error: String(error.message).slice(0, 300) };
+    // Released, so the next check tries again (any portal may pick it up).
+    if (claimSupported) update.claimed_at = null;
+    // After the last try the code is removed too; the department can send a new one.
+    if (attempts >= 5) update.body = item.body_after_send;
+    await restAsServer('PATCH', `email_outbox?id=eq.${item.id}`, update, { Prefer: 'return=minimal' }).catch(() => {});
+    log(`email to ${maskEmail(item.to_email)} failed${attempts >= 5 ? ' (gave up; code removed)' : ''}: ${error.message}`);
+    return false;
+  }
+}
+
+/** Sends everything waiting in the database's email outbox (up to 20 emails per check). */
 async function runOutbox() {
   if (outboxRunning) return { skipped: true };
   outboxRunning = true;
   let sent = 0;
   try {
-    const pending = await restAsServer('GET', 'email_outbox?select=*&sent_at=is.null&attempts=lt.5&order=created_at.asc&limit=20');
-    for (const item of pending || []) {
-      const mail = { to: item.to_email, toName: item.to_name, subject: item.subject, text: item.body };
-      try {
-        let via;
-        if (SMTP.enabled && mayEmail(item.to_email)) {
-          await smtpSend(mail);
-          via = 'smtp';
-        } else {
-          const box = readMailbox();
-          box.push({ id: item.id, to: item.to_email, toName: item.to_name, toUser: item.to_user || null,
-                     subject: item.subject, body: item.body, kind: item.kind, receivedAt: new Date().toISOString() });
-          writeMailbox(box);
-          via = 'demo-mailbox';
-        }
-        // The award code leaves the database once it is delivered.
-        await restAsServer('PATCH', `email_outbox?id=eq.${item.id}`,
-          { sent_at: new Date().toISOString(), delivered_via: via, body: item.body_after_send, last_error: null },
-          { Prefer: 'return=minimal' });
-        sent += 1;
-        log(`email to ${maskEmail(item.to_email)} (${item.kind}) via ${via}`);
-      } catch (error) {
-        const attempts = (item.attempts || 0) + 1;
-        const update = { attempts, last_error: String(error.message).slice(0, 300) };
-        // After the last try the code is removed too; the department can send a new one.
-        if (attempts >= 5) update.body = item.body_after_send;
-        await restAsServer('PATCH', `email_outbox?id=eq.${item.id}`, update, { Prefer: 'return=minimal' }).catch(() => {});
-        log(`email to ${maskEmail(item.to_email)} failed${attempts >= 5 ? ' (gave up; code removed)' : ''}: ${error.message}`);
+    const tried = new Set();
+    for (let i = 0; i < 20; i += 1) {
+      const item = await claimNextEmail();
+      if (item === null) break;            // nothing left
+      if (item === undefined) {            // the database cannot claim yet: the older way
+        const pending = await restAsServer('GET', 'email_outbox?select=*&sent_at=is.null&attempts=lt.5&order=created_at.asc&limit=20');
+        for (const row of pending || []) if (await deliver(row)) sent += 1;
+        break;
       }
+      if (tried.has(item.id)) break;       // failed once already in this check: next check
+      tried.add(item.id);
+      if (await deliver(item)) sent += 1;
     }
     lastOutboxError = '';
   } catch (error) {

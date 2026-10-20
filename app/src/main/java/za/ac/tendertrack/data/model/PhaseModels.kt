@@ -134,7 +134,10 @@ data class PayablePhase(
 /** One alert on a tender's tile, e.g. "Phase 2: compare the photos". */
 @Serializable
 data class TenderAlert(
-    /** phase_check, payment, site_check, closing_passed, award_locked, award_unclaimed, award_claimed, flags, bids */
+    /**
+     * phase_check, payment, site_check, closing_passed, bid_documents, award_locked,
+     * award_unclaimed, award_claimed, flags, bids
+     */
     val kind: String,
     /** danger, warning, info, success or neutral */
     val tone: String = "neutral",
@@ -143,6 +146,13 @@ data class TenderAlert(
 ) {
     /** Alerts that open Phase checks when tapped. */
     val isPhaseAlert: Boolean get() = kind == "phase_check" || kind == "payment" || kind == "site_check"
+
+    /** A supplier submitted (or changed) a bid with its documents on the eTender portal. */
+    val isBidDocumentsAlert: Boolean get() = kind == BID_DOCUMENTS
+
+    companion object {
+        const val BID_DOCUMENTS = "bid_documents"
+    }
 }
 
 @Serializable
@@ -168,7 +178,11 @@ data class AlertTotals(
     @SerialName("site_checks_waiting") val siteChecksWaiting: Int = 0,
     @SerialName("new_documents") val newDocuments: Int = 0,
     @SerialName("companies_with_new_documents") val companiesWithNewDocuments: Int = 0,
-    @SerialName("closing_passed") val closingPassed: Int = 0
+    @SerialName("closing_passed") val closingPassed: Int = 0,
+    /** Bids submitted or changed on the eTender portal since an officer last checked them (portal_fixes.sql). */
+    @SerialName("new_bids") val newBids: Int = 0,
+    @SerialName("new_bid_documents") val newBidDocuments: Int = 0,
+    @SerialName("tenders_with_new_bids") val tendersWithNewBids: Int = 0
 )
 
 @Serializable
@@ -185,6 +199,46 @@ data class OfficerAlerts(
 
     /** Phases waiting for the officer: photos to compare plus payments to approve. */
     val officerActions: Int get() = totals.phaseChecks + totals.paymentsToApprove
+}
+
+// ---------------------------------------------------------------------------
+// Bid documents from the eTender portal (tender_bid_documents in portal_fixes.sql)
+// ---------------------------------------------------------------------------
+
+/** One bid and the documents its supplier confirmed with it on the portal. */
+@Serializable
+data class BidDocumentsEntry(
+    val id: String,
+    val reference: String = "",
+    @SerialName("supplier_name") val supplierName: String = "",
+    @SerialName("csd_number") val csdNumber: String? = null,
+    @SerialName("supplier_status") val supplierStatus: String? = null,
+    @SerialName("submitted_at") val submittedAt: String? = null,
+    val status: String = "submitted",
+    val documents: List<String> = emptyList(),
+    @SerialName("documents_received") val documentsReceived: Int = 0,
+    @SerialName("documents_required") val documentsRequired: Int = 0,
+    /** Null while bidding is open: prices stay sealed until it closes. */
+    @SerialName("bid_value") val bidValue: Double? = null,
+    /** Submitted or changed since an officer last marked this tender's bid documents as checked. */
+    @SerialName("is_new") val isNew: Boolean = false
+)
+
+/** A tender's bids with their documents, for the officer. */
+@Serializable
+data class TenderBidDocuments(
+    @SerialName("tender_id") val tenderId: String,
+    @SerialName("reference_number") val referenceNumber: String = "",
+    val title: String = "",
+    val status: String = "",
+    @SerialName("closing_date") val closingDate: String? = null,
+    /** True while bidding is open. */
+    val sealed: Boolean = true,
+    @SerialName("seen_at") val seenAt: String? = null,
+    @SerialName("required_documents") val requiredDocuments: List<String> = emptyList(),
+    val bids: List<BidDocumentsEntry> = emptyList()
+) {
+    val newBids: Int get() = bids.count { it.isNew }
 }
 
 // ---------------------------------------------------------------------------
@@ -211,7 +265,9 @@ data class TwoFactorSetUp(
     /** The key to type into the app if the link does not open it. */
     val secret: String,
     /** otpauth://totp/... : opens the authenticator app with everything filled in. */
-    val uri: String
+    val uri: String,
+    /** The QR code from Supabase (an SVG picture), to scan with a phone. Empty if there is none. */
+    val qrSvg: String = ""
 ) {
     /** "ABCD EFGH IJKL ..." : easier to read and type. */
     val groupedSecret: String get() = secret.chunked(4).joinToString(" ")

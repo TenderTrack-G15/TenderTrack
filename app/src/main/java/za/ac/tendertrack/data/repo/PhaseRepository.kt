@@ -66,6 +66,12 @@ interface PhaseRepository {
     /** Clears a company's new-documents count without verifying or rejecting it. */
     suspend fun markDocumentsChecked(supplierId: String)
 
+    /** A tender's bids and the documents each supplier confirmed on the eTender portal. */
+    suspend fun bidDocuments(tenderId: String): TenderBidDocuments
+
+    /** The officer has checked them: the tender's "New bid documents" alert goes away. */
+    suspend fun markBidDocumentsChecked(tenderId: String)
+
     // -- Any of the three (the database decides who may see which photo) ---------
 
     suspend fun photo(photoId: String): PhasePhoto
@@ -111,6 +117,8 @@ private object PhaseApi {
     const val OFFICER_ALERTS = "officer_alerts"
     const val MARK_DOCUMENTS_REVIEWED = "mark_supplier_documents_reviewed"
     const val PHASE_PHOTO = "phase_photo"
+    const val TENDER_BID_DOCUMENTS = "tender_bid_documents"
+    const val MARK_BID_DOCUMENTS_SEEN = "mark_bid_documents_seen"
 }
 
 // ---------------------------------------------------------------------------
@@ -185,6 +193,16 @@ class SupabasePhaseRepository(private val client: SupabaseClient) : PhaseReposit
     override suspend fun photo(photoId: String): PhasePhoto = withContext(Dispatchers.IO) {
         call(PhaseApi.PHASE_PHOTO, buildJsonObject { put("p_photo_id", photoId) }).decodeAs<PhasePhoto>()
     }
+
+    override suspend fun bidDocuments(tenderId: String): TenderBidDocuments = withContext(Dispatchers.IO) {
+        call(PhaseApi.TENDER_BID_DOCUMENTS, buildJsonObject { put("p_tender_id", tenderId) }).decodeAs<TenderBidDocuments>()
+    }
+
+    override suspend fun markBidDocumentsChecked(tenderId: String) {
+        withContext(Dispatchers.IO) {
+            call(PhaseApi.MARK_BID_DOCUMENTS_SEEN, buildJsonObject { put("p_tender_id", tenderId) })
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -198,6 +216,7 @@ class SupabasePhaseRepository(private val client: SupabaseClient) : PhaseReposit
  *
  *   t-001  GP/IT/2290   Infratech (the sample supplier): every phase still to do.
  *   t-006  GP/CLD/1187  Siyakhula: phases 1 and 2 paid, phase 3 ready to compare.
+ *   t-002  WC/SF/1042   open for bids: a new bid from Lethabo Digital with its documents.
  */
 class SamplePhaseRepository : PhaseRepository {
 
@@ -221,6 +240,19 @@ class SamplePhaseRepository : PhaseRepository {
     private var nextId = 1
     private val phases: MutableList<ContractPhase> = contracts.flatMap { c -> standardPhases(c) }.toMutableList()
     private val documentsChecked = mutableSetOf<String>()
+    private val bidDocumentsChecked = mutableSetOf<String>()
+
+    /** WC/SF/1042 (open for bids): one bid already checked, one new from the eTender portal. */
+    private val sampleRequired = listOf(
+        "Company registration certificate (CIPC)", "Tax clearance certificate / PIN", "B-BBEE certificate or affidavit",
+        "Technical proposal", "Pricing schedule (SBD 3.1)"
+    )
+    private val sampleBids = listOf(
+        BidDocumentsEntry("b-101", "BID-2026-00987", "Vuka IT Consulting", "MAAA0451236", "awaiting_verification",
+            "2026-09-22T09:14:00Z", documents = sampleRequired, documentsReceived = 5, documentsRequired = 5),
+        BidDocumentsEntry("b-102", "BID-2026-01000", "Lethabo Digital CC", "MAAA0778120", "awaiting_verification",
+            "2026-09-30T14:02:00Z", documents = sampleRequired, documentsReceived = 5, documentsRequired = 5, isNew = true)
+    )
 
     init {
         // GP/CLD/1187: two phases done and approved, the third waiting for the officer.
@@ -408,15 +440,25 @@ class SamplePhaseRepository : PhaseRepository {
         }
         val newDocs = if ("s-004" in documentsChecked) emptyList()
         else listOf(NewDocumentSupplier("s-004", "Lethabo Digital CC", 1))
+        val newBids = if ("t-002" in bidDocumentsChecked) emptyList() else sampleBids.filter { it.isNew }
+        val bidTiles = if (newBids.isEmpty()) emptyList() else listOf(
+            TenderAlerts("t-002", "WC/SF/1042", "published", listOf(
+                TenderAlert(TenderAlert.BID_DOCUMENTS, "warning",
+                    "New bid documents from ${newBids.single().supplierName} (${newBids.sumOf { it.documentsReceived }})")
+            ))
+        )
         return OfficerAlerts(
             newDocumentSuppliers = newDocs,
-            tenders = byTender,
+            tenders = byTender + bidTiles,
             totals = AlertTotals(
                 phaseChecks = phases.count { it.state == PhaseState.AWAITING_OFFICER },
                 paymentsToApprove = phases.count { it.state == PhaseState.VERIFIED },
                 siteChecksWaiting = phases.count { it.state == PhaseState.AWAITING_SITE_CHECK },
                 newDocuments = newDocs.sumOf { it.newDocuments },
-                companiesWithNewDocuments = newDocs.size
+                companiesWithNewDocuments = newDocs.size,
+                newBids = newBids.size,
+                newBidDocuments = newBids.sumOf { it.documentsReceived },
+                tendersWithNewBids = if (newBids.isEmpty()) 0 else 1
             )
         )
     }
@@ -427,4 +469,18 @@ class SamplePhaseRepository : PhaseRepository {
 
     override suspend fun photo(photoId: String): PhasePhoto =
         photos[photoId] ?: throw IllegalArgumentException("That photo no longer exists.")
+
+    override suspend fun bidDocuments(tenderId: String): TenderBidDocuments {
+        if (tenderId != "t-002") return TenderBidDocuments(tenderId = tenderId)
+        val checked = tenderId in bidDocumentsChecked
+        return TenderBidDocuments(
+            tenderId = tenderId, referenceNumber = "WC/SF/1042", title = "SaaS CRM Integration", status = "published",
+            closingDate = "2026-11-10T10:00:00Z", sealed = true, requiredDocuments = sampleRequired,
+            bids = sampleBids.map { if (checked) it.copy(isNew = false) else it }.sortedByDescending { it.submittedAt }
+        )
+    }
+
+    override suspend fun markBidDocumentsChecked(tenderId: String) {
+        bidDocumentsChecked += tenderId
+    }
 }

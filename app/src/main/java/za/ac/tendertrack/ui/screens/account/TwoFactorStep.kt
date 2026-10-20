@@ -83,17 +83,30 @@ class TwoFactorGate(private val repository: TwoFactorRepository = TwoFactorRepos
             repository.verify(step.factorId, code)
             null
         } catch (e: Exception) {
-            val wrong = step.wrongCodes + 1
             val raw = e.message.orEmpty()
-            val left = MAX_WRONG_CODES - wrong
-            val message = when {
-                raw.contains("expired", true) -> "That code has expired. Type the newest code from the app."
-                raw.contains("TOTP", true) || raw.contains("verification", true) || raw.contains("invalid", true) ->
-                    "That code is not right. Check that the phone's date and time are set automatically, then type " +
-                        "the newest code. $left ${if (left == 1) "try" else "tries"} left."
-                else -> e.twoFactorProblem()
+            // Only a code Supabase rejected counts as a wrong try; any other problem is shown as it is.
+            val wrongCode = raw.contains("Invalid TOTP", true) || raw.contains("mfa_verification_failed", true)
+            if (!wrongCode) {
+                val message = when {
+                    raw.contains("IP address", true) || raw.contains("ip_address_mismatch", true) ->
+                        "The phone's internet connection changed while the code was being checked. Type the newest " +
+                            "code and tap the button again."
+                    raw.contains("expired", true) -> "That attempt expired. Type the newest code and tap the button again."
+                    else -> e.twoFactorProblem()
+                }
+                return step.copy(code = "", error = message)
             }
-            step.copy(code = "", error = message, wrongCodes = wrong)
+            val wrong = step.wrongCodes + 1
+            val left = MAX_WRONG_CODES - wrong
+            step.copy(
+                code = "",
+                error = "That code is not right. " +
+                    (if (step.setUp != null) "Check that the key in your authenticator app is exactly the key on this " +
+                        "screen (it is new each time this screen opens). " else "") +
+                    "The phone with the authenticator must have its date and time set automatically. " +
+                    "$left ${if (left == 1) "try" else "tries"} left.",
+                wrongCodes = wrong
+            )
         }
     }
 
@@ -150,6 +163,19 @@ fun TwoFactorStep(
                 "key, then in the app choose \"Enter a setup key\" (time-based).")
             SetUpStep(3, "Type the 6-digit code", "Come back here and type the code the app shows for TenderTrack.", last = true)
         }
+        val qr = remember(setUp.qrSvg) { QrSvg.parse(setUp.qrSvg) }
+        if (qr != null) {
+            AppCard {
+                Text("Authenticator on another phone?", style = AppType.KvValue)
+                Text(
+                    "If TenderTrack is open on an emulator or on a different phone, open your authenticator app on " +
+                        "your phone, choose Add → Scan a QR code, and scan this:",
+                    style = AppType.Meta
+                )
+                Spacer(Modifier.height(Dimens.SpaceSm))
+                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { QrCodeImage(qr) }
+            }
+        }
         SecondaryButton(
             text = "Open authenticator app",
             icon = Icons.AutoMirrored.Filled.OpenInNew,
@@ -182,6 +208,12 @@ fun TwoFactorStep(
             }
         )
         notice?.let { NoteBanner(text = it, tone = NoteTone.Neutral, icon = Icons.Default.Info) }
+        NoteBanner(
+            text = "This key is new every time this screen opens, until set-up is finished. If TenderTrack is already " +
+                "in your authenticator app from an earlier try, delete that entry and add this one.",
+            tone = NoteTone.Warning,
+            icon = Icons.Default.Warning
+        )
     } else {
         Text(
             "Open your authenticator app and type the 6-digit code shown for TenderTrack.",

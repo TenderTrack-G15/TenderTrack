@@ -4,6 +4,8 @@
  *   Evaluation      compare the bids and award one
  *   Awarded         the award code: sent, claimed, expired or locked; send a new one;
  *                   (contract phases are followed and verified in the TenderTrack app)
+ *   All documents   one PDF per tender: the tender documents, every bid with the
+ *                   documents its supplier confirmed, and the bidders' registration documents
  * The award code itself is created and checked by the database; this page
  * never sees it.
  */
@@ -11,7 +13,8 @@
 import { chrome, requireRole, showError } from '../layout.js';
 import { sb, rpc, rows, flushOutbox } from '../client.js';
 import { h, clear, icon, note, badge, money, date, dateTime, daysUntil, empty, toast, modal, field, busy, confirmDialog, fill, put } from '../ui.js';
-import { statusBadge } from '../tenders-data.js';
+import { statusBadge, loadPack } from '../tenders-data.js';
+import { officerDocumentsPdf, savePdf } from '../documents-pdf.js';
 
 const TABS = [['open', 'Open for bids'], ['evaluation', 'Evaluation'], ['awarded', 'Awarded'], ['all', 'All']];
 const REG = { awaiting_verification: ['Awaiting verification', 'warn'], verified: ['Verified', 'success'], not_approved: ['Not approved', 'danger'] };
@@ -43,7 +46,7 @@ async function render() {
     [tenders, bids] = await Promise.all([
       rows(sb.from('tenders').select('id, reference_number, title, description, department, category, status, closing_date, published_at, created_at, estimated_budget, awarded_supplier_id, awarded_supplier_name, awarded_value, awarded_at')
         .neq('status', 'registered').order('closing_date', { ascending: false })),
-      rows(sb.from('bids').select('id, tender_id, reference, supplier_id, supplier_name, bid_value, submitted_at, status, documents_received, documents_required, preference_claim, validity_days, notes')),
+      rows(sb.from('bids').select('id, tender_id, reference, supplier_id, supplier_name, bid_value, submitted_at, status, documents_received, documents_required, submitted_documents, preference_claim, validity_days, notes')),
     ]);
     if (state.selected) {
       const t = tenders.find((x) => x.id === state.selected);
@@ -198,6 +201,26 @@ async function render() {
     }
   }
 
+  /** Downloads one PDF with every document for the tender (not a spreadsheet). */
+  async function downloadAll(t, button) {
+    await busy(button, async () => {
+      try {
+        const tenderBids = bids.filter((b) => b.tender_id === t.id && b.status !== 'withdrawn');
+        const ids = [...new Set(tenderBids.map((b) => b.supplier_id).filter(Boolean))];
+        const [pack, suppliers, documents] = await Promise.all([
+          loadPack(t.id).catch(() => null),
+          ids.length ? rows(sb.from('suppliers').select('id, company_name, status, csd_number').in('id', ids)).catch(() => []) : [],
+          ids.length ? rows(sb.from('supplier_documents').select('supplier_id, name, status, reference, expires_at, file_url').in('supplier_id', ids)).catch(() => []) : [],
+        ]);
+        const file = officerDocumentsPdf({ tender: t, pack, bids: tenderBids, suppliers, documents, officer: who.profile.full_name });
+        savePdf(file);
+        toast(`Downloaded ${file.fileName}.`);
+      } catch (e) {
+        toast(`The PDF could not be made: ${e.message}`, 'error');
+      }
+    });
+  }
+
   // ---- detail ---------------------------------------------------------------
 
   async function drawDetail() {
@@ -218,7 +241,10 @@ async function render() {
       kv('Closing date', dateTime(t.closing_date)),
       kv('Estimated budget (internal)', money(t.estimated_budget)),
       kv('Bids received', String(live.length)),
-      h('div', { class: 'row mt' }, h('a', { class: 'btn btn-secondary btn-sm', href: `/tender?id=${t.id}` }, icon('document'), 'Public tender page')));
+      h('div', { class: 'row mt' },
+        h('button', { class: 'btn btn-primary btn-sm', type: 'button', title: 'One PDF: tender documents, bids and the bidders\' registration documents',
+          onclick: (e) => downloadAll(t, e.currentTarget) }, icon('download'), 'Download all documents (PDF)'),
+        h('a', { class: 'btn btn-secondary btn-sm', href: `/tender?id=${t.id}` }, icon('document'), 'Public tender page')));
     detailEl.appendChild(card);
 
     if (t.status === 'published') {

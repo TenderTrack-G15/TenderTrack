@@ -18,7 +18,8 @@ Node.js 20 or newer: nothing to install, no XAMPP, no PHP.
 
 ## Run it
 
-1. Run `supabase/etender_awards.sql` once in the Supabase SQL Editor.
+1. Run `supabase/etender_awards.sql`, then `supabase/phase_proof.sql`, then
+   `supabase/portal_fixes.sql` once each in the Supabase SQL Editor.
 2. Copy `.env.example` to `.env` and fill in the three Supabase values.
 3. Double-click `start-etender-portal.bat` (Windows), or run `node server.js`
    in this folder.
@@ -36,6 +37,17 @@ Suppliers and procurement officers sign in here with their password and then a
 authenticator as in the TenderTrack app). A company that has just registered
 here can finish its registration without the code; the code is asked for at its
 next sign-in.
+
+The tax clearance, B-BBEE certificate and industry licences need an expiry date
+that has not passed, at registration and in the database. When a supplier
+submits or changes a bid with its documents, the tender's card in the
+TenderTrack app shows **New bid documents** to the procurement officer.
+
+Tender documents download as **PDF** files, one at a time or all together, and
+the Department console's **Download all documents (PDF)** gives the officer one
+PDF with the tender documents, every bid with the documents its supplier
+confirmed, and the bidders' registration documents (prices stay sealed while
+bidding is open).
 
 ## The award code
 
@@ -63,6 +75,7 @@ database.
 | No code from the internet; strict Content Security Policy; nothing from the database is inserted as HTML | `public/` |
 | The demo mailbox shows each email only to the account it was sent for | `server.js`, `email_outbox.to_user` |
 | Email passwords never appear in logs or error messages | `server.js` |
+| Each email is sent once, even with several portals running (each claims it in the database first) | `server.js`, `claim_email_outbox` |
 | Real email only to allowed addresses (the sender's own domain, plus `EMAIL_ALLOWLIST`), never to the made-up sample companies | `server.js` |
 | An officer can verify a registration but not change the email a code is sent to; a contract cannot be started before the code is claimed, even by editing the table directly | `supabase/etender_awards.sql` |
 
@@ -80,6 +93,8 @@ public/
   js/layout.js              header, navigation and footer
   js/ui.js                  shared building blocks (safe text only), formatting, dialogs
   js/tenders-data.js        tender lists and tender packs
+  js/pdf.js                 a small PDF writer (no library)
+  js/documents-pdf.js       the PDF downloads: tender documents, the officer's "all documents"
   js/pages/*.js             one file per page
   fonts/                    Inter
   vendor/supabase.js        supabase-js, kept locally
