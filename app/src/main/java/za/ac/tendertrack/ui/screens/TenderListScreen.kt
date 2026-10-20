@@ -31,6 +31,7 @@ import za.ac.tendertrack.data.model.TenderStatus
 import za.ac.tendertrack.data.repo.OfficerAlertsStore
 import za.ac.tendertrack.data.repo.TenderRepository
 import za.ac.tendertrack.ui.components.*
+import za.ac.tendertrack.ui.screens.phases.BidDocumentsDialog
 import za.ac.tendertrack.ui.screens.phases.badgeTone
 import za.ac.tendertrack.ui.theme.AppColor
 import za.ac.tendertrack.ui.theme.AppType
@@ -88,7 +89,9 @@ class TenderListViewModel(
 
 /**
  * All tenders, with search and status filters, and the entry point to Register.
- * Each card shows that tender's alerts; a phase alert opens its Phase checks.
+ * Each card shows that tender's alerts; a phase alert opens its Phase checks,
+ * and "New bid documents" (a bid submitted on the eTender portal) shows the
+ * bids and their documents.
  */
 @Composable
 fun TenderListScreen(
@@ -101,6 +104,12 @@ fun TenderListScreen(
 ) {
     val state by viewModel.state.collectAsState()
     val alerts by viewModel.alerts.collectAsState()
+    /** The tender whose bid documents are open, if any. */
+    var bidDocumentsFor by remember { mutableStateOf<String?>(null) }
+
+    bidDocumentsFor?.let { tenderId ->
+        BidDocumentsDialog(tenderId = tenderId, onDismiss = { bidDocumentsFor = null })
+    }
 
     AppScaffold(
         title = "All Tenders",
@@ -153,8 +162,11 @@ fun TenderListScreen(
                                 tender = tender,
                                 alerts = alerts?.forTender(tender.id).orEmpty(),
                                 onAlert = { alert ->
-                                    if (alert.isPhaseAlert && onOpenPhaseChecks != null) onOpenPhaseChecks(tender.id)
-                                    else onOpenTender(tender.id)
+                                    when {
+                                        alert.isBidDocumentsAlert -> bidDocumentsFor = tender.id
+                                        alert.isPhaseAlert && onOpenPhaseChecks != null -> onOpenPhaseChecks(tender.id)
+                                        else -> onOpenTender(tender.id)
+                                    }
                                 },
                                 onOpenPhases = onOpenPhaseChecks?.let { open -> { open(tender.id) } }
                             ) { onOpenTender(tender.id) }

@@ -22,16 +22,49 @@ const CATEGORIES = ['IT infrastructure', 'Software development', 'Cloud services
 const INDUSTRIES = ['Information and communication technology', 'Construction and engineering', 'Professional services', 'Health', 'Education', 'Manufacturing', 'Other'];
 const THIS_YEAR = new Date().getFullYear();
 
-/** Document names match default_supplier_documents in the database. */
+/**
+ * Document names match default_supplier_documents in the database.
+ * [name, required, needs an expiry date]. The tax clearance, B-BBEE certificate
+ * and industry licences expire, so their expiry date must be entered and must
+ * not have passed (the database checks this too: supabase/portal_fixes.sql).
+ */
+const TAX_DOCUMENT = 'Tax clearance certificate / PIN';
+const BBBEE_DOCUMENT = 'B-BBEE certificate or affidavit';
 const DOCUMENTS = [
-  ['Company registration certificate (CIPC)', true],
-  ['Tax clearance certificate / PIN', true],
-  ['B-BBEE certificate or affidavit', false],
-  ['Proof of business address', true],
-  ['Company profile', true],
-  ['Proof of banking details', true],
-  ['Industry licences or certifications', false],
+  ['Company registration certificate (CIPC)', true, false],
+  [TAX_DOCUMENT, true, true],
+  [BBBEE_DOCUMENT, false, true],
+  ['Proof of business address', true, false],
+  ['Company profile', true, false],
+  ['Proof of banking details', true, false],
+  ['Industry licences or certifications', false, true],
 ];
+
+/** Today as YYYY-MM-DD in the supplier's own time zone (a date field's format). */
+function today() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+/** "11 October 2025" */
+function longDate(iso) {
+  const [y, m, d] = String(iso).split('-').map(Number);
+  if (!y || !m || !d) return iso;
+  return new Date(y, m - 1, d).toLocaleDateString('en-ZA', { day: 'numeric', month: 'long', year: 'numeric' });
+}
+
+/**
+ * What is wrong with an expiry date, or '' if nothing: it must be a real date,
+ * today or later, and not absurdly far away (usually a typing mistake in the year).
+ */
+function expiryProblem(value, what) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(value))) return 'Enter the date as day, month and year.';
+  if (value < today()) {
+    return `This date has passed: the ${what} expired on ${longDate(value)}. Enter a valid date — the expiry date of a current ${what} (today or later).`;
+  }
+  if (Number(value.slice(0, 4)) > new Date().getFullYear() + 10) return 'Check the year: that date is more than 10 years away.';
+  return '';
+}
 
 const RX = {
   registration: [/^\d{4}\/\d{6}\/\d{2}$/, 'Use the CIPC format, e.g. 2019/451236/07.'],
@@ -61,7 +94,7 @@ const STEPS = [
     { key: 'contact_person', label: 'Contact person name', required: true },
     { key: 'job_title', label: 'Job title', required: true },
     { key: 'contact_email', label: 'Email address', required: true, rx: 'email', type: 'email', hint: 'Award codes are emailed here.' },
-    { key: 'phone_number', label: 'Phone number', rx: 'phone', type: 'tel', placeholder: '0112345678' },
+    { key: 'phone_number', label: 'Landline/Telephone (optional)', rx: 'phone', type: 'tel', placeholder: '0112345678', hint: 'Leave empty if the company has no landline.' },
     { key: 'mobile_number', label: 'Mobile number', required: true, rx: 'mobile', type: 'tel', placeholder: '0821234567' },
     { key: 'province', label: 'Province', required: true, type: 'select', options: PROVINCES },
     { key: 'physical_address', label: 'Physical address', required: true, type: 'textarea', full: true },
@@ -70,10 +103,12 @@ const STEPS = [
   { id: 'compliance', title: 'Compliance information', intro: 'Tax, B-BBEE, licences and professional registrations. The certificates themselves are listed under Supporting documents.', fields: [
     { key: 'tax_clearance_status', label: 'Tax clearance status', required: true, type: 'select',
       options: [['valid', 'Tax compliant (valid PIN)'], ['pending', 'Application pending'], ['not_submitted', 'Not yet obtained']] },
-    { key: 'tax_clearance_expiry', label: 'Tax clearance valid until', type: 'date', requiredIf: (d) => d.tax_clearance_status === 'valid' },
+    { key: 'tax_clearance_expiry', label: 'Tax clearance valid until', type: 'date', requiredIf: (d) => d.tax_clearance_status === 'valid',
+      expiry: 'tax clearance', hint: 'The expiry date on your tax compliance status (PIN). It must not have passed.' },
     { key: 'bbbee_level', label: 'B-BBEE status level (where applicable)', type: 'select',
       options: [['', 'Not applicable / non-compliant'], ...[1, 2, 3, 4, 5, 6, 7, 8].map((n) => [String(n), `Level ${n}`])] },
-    { key: 'bbbee_expiry', label: 'B-BBEE certificate valid until', type: 'date', requiredIf: (d) => Boolean(d.bbbee_level) },
+    { key: 'bbbee_expiry', label: 'B-BBEE certificate valid until', type: 'date', requiredIf: (d) => Boolean(d.bbbee_level),
+      expiry: 'B-BBEE certificate' },
     { key: 'industry_licences', label: 'Industry licences and certifications', type: 'textarea', full: true, placeholder: 'e.g. ICASA ECNS licence; ISO 27001 certificate' },
     { key: 'professional_registrations', label: 'Professional registrations', type: 'textarea', full: true, placeholder: 'e.g. ECSA, IITPSA, CIDB grading' },
   ] },
@@ -92,7 +127,7 @@ const STEPS = [
     { key: 'geographic_areas', label: 'Geographic areas served', required: true, type: 'checks', options: ['National', ...PROVINCES], full: true },
     { key: 'company_profile', label: 'Company profile', type: 'textarea', full: true, placeholder: 'A short description of the company, its history and major clients.' },
   ] },
-  { id: 'documents', title: 'Supporting documents', intro: 'For each document, record its reference number and, if it expires, the expiry date. Files are not uploaded in this demo: add a link if the document is online.' },
+  { id: 'documents', title: 'Supporting documents', intro: 'For each document, record its reference number. The tax clearance, B-BBEE certificate and industry licences also need their expiry date, which must not have passed. Files are not uploaded in this demo: add a link if the document is online.' },
   { id: 'account', title: 'Account and declaration', intro: 'You sign in to this portal with this email and password, and use the same ones to register for the TenderTrack app afterwards.', fields: [
     { key: 'email', label: 'Sign-in email address', required: true, rx: 'email', type: 'email', autocomplete: 'username' },
     { key: 'password', label: 'Password', required: true, type: 'password', autocomplete: 'new-password', hint: 'At least 8 characters, with letters and numbers.' },
@@ -149,6 +184,10 @@ async function render() {
     const required = f.required || (f.requiredIf && f.requiredIf(data));
     if (required && empty) return f.type === 'checkbox' ? 'Tick the declaration to continue.' : f.type === 'checks' ? 'Choose at least one.' : 'This is required.';
     if (!empty && f.rx && !RX[f.rx][0].test(String(v).trim())) return RX[f.rx][1];
+    if (!empty && f.expiry) {
+      const problem = expiryProblem(String(v), f.expiry);
+      if (problem) return problem;
+    }
     if (!empty && f.type === 'number') {
       const n = Number(v);
       if (!Number.isInteger(n) || n < f.min || n > f.max) return `Enter a whole number from ${f.min} to ${f.max}.`;
@@ -158,22 +197,35 @@ async function render() {
     return '';
   }
 
+  /** A company that claims a B-BBEE level (Compliance step) must include its certificate. */
+  function isRequired(name, required) {
+    return required || (name === BBBEE_DOCUMENT && Boolean(data.bbbee_level));
+  }
+
   /** What is wrong with one supporting document, or '' if nothing. */
-  function docError(name, required) {
+  function docError(name, required, dated) {
     const d = docs[name];
-    if (required && !d.provided) return 'This document is required.';
-    if (d.provided && d.reference.trim().length < 2) return 'Enter the document reference or number.';
-    if (d.link && !RX.url[0].test(d.link.trim())) return RX.url[1];
-    if (d.provided && d.expires && d.expires < new Date().toISOString().slice(0, 10)) {
-      return 'This document has expired. Enter the new document\'s reference and expiry date.';
+    if (isRequired(name, required) && !d.provided) {
+      return name === BBBEE_DOCUMENT && !required
+        ? `This document is required because you chose B-BBEE Level ${data.bbbee_level} under Compliance information.`
+        : 'This document is required.';
     }
+    if (!d.provided) return d.link && !RX.url[0].test(d.link.trim()) ? RX.url[1] : '';
+    if (d.reference.trim().length < 2) return 'Enter the document reference or number.';
+    if (dated && !d.expires) return 'Enter the expiry date. It is required for this document.';
+    if (d.expires) {
+      const what = { [TAX_DOCUMENT]: 'tax clearance', [BBBEE_DOCUMENT]: 'B-BBEE certificate', 'Industry licences or certifications': 'licence' }[name] || 'document';
+      const problem = expiryProblem(d.expires, what);
+      if (problem) return problem;
+    }
+    if (d.link && !RX.url[0].test(d.link.trim())) return RX.url[1];
     return '';
   }
 
   function validateDocs() {
     let ok = true;
-    for (const [name, required] of DOCUMENTS) {
-      docs[name].error = docError(name, required);
+    for (const [name, required, dated] of DOCUMENTS) {
+      docs[name].error = docError(name, required, dated);
       if (docs[name].error) ok = false;
     }
     return ok;
@@ -199,7 +251,7 @@ async function render() {
   function stepIsValid(i) {
     const step = STEPS[i];
     if (step.id === 'review') return true;
-    if (step.id === 'documents') return DOCUMENTS.every(([name, required]) => !docError(name, required));
+    if (step.id === 'documents') return DOCUMENTS.every(([name, required, dated]) => !docError(name, required, dated));
     return fieldsOf(step).every((f) => !validateField(f));
   }
 
@@ -261,7 +313,11 @@ async function render() {
 
   function input(f) {
     const common = { id: `f-${f.key}`, 'aria-invalid': errors[f.key] ? 'true' : 'false' };
-    const set = (value) => { data[f.key] = value; if (errors[f.key]) { errors[f.key] = validateField(f); refreshError(f); } };
+    // An expiry date is checked as soon as it is chosen, so an expired one is rejected straight away.
+    const set = (value) => {
+      data[f.key] = value;
+      if (errors[f.key] || (f.expiry && value)) { errors[f.key] = validateField(f); refreshError(f); }
+    };
     if (f.type === 'select') {
       const opts = f.options.map((o) => (Array.isArray(o) ? o : [o, o]));
       const el = h('select', { class: 'select', ...common, onchange: (e) => { set(e.target.value); if (f.key === 'tax_clearance_status' || f.key === 'bbbee_level') drawPanel(); } },
@@ -281,7 +337,8 @@ async function render() {
     return h('input', {
       class: f.upper ? 'input upper' : 'input', ...common, type: f.type || 'text', placeholder: f.placeholder || '', value: data[f.key] ?? '',
       readonly: finishing && f.key === 'csd_number',
-      autocomplete: f.autocomplete || 'off', inputmode: f.inputmode || null, min: f.min != null ? String(f.min) : null, max: f.max != null ? String(f.max) : null,
+      autocomplete: f.autocomplete || 'off', inputmode: f.inputmode || null,
+      min: f.expiry ? today() : f.min != null ? String(f.min) : null, max: f.max != null ? String(f.max) : null,
       oninput: (e) => set(f.upper ? e.target.value.toUpperCase() : e.target.value),
     });
   }
@@ -303,27 +360,44 @@ async function render() {
   }
 
   function documentsPanel() {
-    return DOCUMENTS.map(([name, required]) => {
+    // The dates from the Compliance step fill in the matching certificates' expiry dates.
+    const fromCompliance = { [TAX_DOCUMENT]: data.tax_clearance_expiry, [BBBEE_DOCUMENT]: data.bbbee_expiry };
+    return DOCUMENTS.map(([name, required, dated]) => {
       const d = docs[name];
+      if (dated && !d.expires && fromCompliance[name] && !expiryProblem(fromCompliance[name], 'document')) d.expires = fromCompliance[name];
+      const needed = isRequired(name, required);
+      const dateInput = h('input', { class: 'input', type: 'date', value: d.expires, min: today(), 'aria-invalid': 'false',
+        'aria-required': dated ? 'true' : null, oninput: (e) => { d.expires = e.target.value; checkDate(); } });
       const detail = h('div', { class: 'form-grid mt', hidden: !d.provided },
-        h('div', { class: 'field' }, h('label', { class: 'label' }, 'Reference or number'), h('input', { class: 'input', value: d.reference, maxlength: '120', oninput: (e) => { d.reference = e.target.value; } })),
-        h('div', { class: 'field' }, h('label', { class: 'label' }, 'Expiry date (if any)'), h('input', { class: 'input', type: 'date', value: d.expires, oninput: (e) => { d.expires = e.target.value; } })),
+        h('div', { class: 'field' }, h('label', { class: 'label' }, 'Reference or number', h('span', { class: 'req' }, ' *')),
+          h('input', { class: 'input', value: d.reference, maxlength: '120', oninput: (e) => { d.reference = e.target.value; } })),
+        h('div', { class: 'field' }, h('label', { class: 'label' }, dated ? 'Expiry date' : 'Expiry date (if any)', dated ? h('span', { class: 'req' }, ' *') : null),
+          dateInput, dated ? h('span', { class: 'hint' }, 'Required. It must not have passed.') : null),
         h('div', { class: 'field full' }, h('label', { class: 'label' }, 'Link to the document (optional)'), h('input', { class: 'input', value: d.link, placeholder: 'https://', oninput: (e) => { d.link = e.target.value; } })));
       const error = h('p', { class: 'field-error', hidden: !d.error }, d.error || '');
+      const show = () => {
+        error.textContent = d.error || '';
+        error.hidden = !d.error;
+        dateInput.setAttribute('aria-invalid', d.error && /date|expired|year/i.test(d.error) ? 'true' : 'false');
+      };
       // A message already shown is updated as the supplier fixes it.
       const recheck = () => {
         if (!d.error) return;
-        if (required && !d.provided) d.error = 'This document is required.';
-        else if (d.provided && d.reference.trim().length < 2) d.error = 'Enter the document reference or number.';
-        else if (d.link && !RX.url[0].test(d.link.trim())) d.error = RX.url[1];
-        else d.error = '';
-        error.textContent = d.error;
-        error.hidden = !d.error;
+        d.error = docError(name, required, dated);
+        show();
+      };
+      // A date that has passed is rejected as soon as it is entered.
+      const checkDate = () => {
+        if (!d.expires) { recheck(); return; }
+        d.error = docError(name, required, dated);
+        show();
       };
       detail.addEventListener('input', recheck);
+      show();
       return h('div', { class: 'doc-card' },
         h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: d.provided, onchange: (e) => { d.provided = e.target.checked; detail.hidden = !d.provided; recheck(); } }),
-          h('span', {}, h('strong', {}, name), required ? h('span', { class: 'req' }, ' *') : h('span', { class: 'secondary' }, ' (if applicable)'))),
+          h('span', {}, h('strong', {}, name), needed ? h('span', { class: 'req' }, ' *') : h('span', { class: 'secondary' }, ' (if applicable)'),
+            dated ? h('span', { class: 'secondary' }, ' · expiry date required') : null)),
         detail,
         error);
     });
@@ -351,7 +425,9 @@ async function render() {
     }
     rows.push(h('div', { class: 'mb' }, reviewHeading('Supporting documents', STEPS.findIndex((x) => x.id === 'documents')),
       DOCUMENTS.map(([name]) => h('div', { class: 'kv' }, h('span', { class: 'kv-key' }, name),
-        h('span', { class: 'kv-value' }, docs[name].provided ? docs[name].reference : 'Not provided')))));
+        h('span', { class: 'kv-value' }, docs[name].provided
+          ? `${docs[name].reference}${docs[name].expires ? ` · expires ${longDate(docs[name].expires)}` : ''}`
+          : 'Not provided')))));
     return rows;
   }
 

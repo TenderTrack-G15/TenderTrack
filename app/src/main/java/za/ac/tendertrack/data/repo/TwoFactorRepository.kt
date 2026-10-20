@@ -71,7 +71,7 @@ class SupabaseTwoFactorRepository(private val client: SupabaseClient) : TwoFacto
         val factor = client.auth.mfa.enroll(FactorType.TOTP, friendlyName = "TenderTrack app $stamp") {
             issuer = AUTHENTICATOR_ISSUER
         }
-        TwoFactorSetUp(factorId = factor.id, secret = factor.data.secret, uri = factor.data.uri)
+        TwoFactorSetUp(factorId = factor.id, secret = factor.data.secret, uri = factor.data.uri, qrSvg = factor.data.qrCode)
     }
 
     override suspend fun verify(factorId: String, code: String) {
