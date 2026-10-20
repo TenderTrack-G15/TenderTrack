@@ -34,6 +34,9 @@ export function messageOf(error) {
   if (/Invalid login credentials/i.test(raw)) return 'Incorrect email or password.';
   if (/banned/i.test(raw)) return 'This account has been suspended. Contact the department.';
   if (/JWT expired|invalid JWT/i.test(raw)) return 'Your session has expired. Sign in again.';
+  if (error.hint === 'mfa_required' || /Two-factor sign-in required/i.test(raw)) {
+    return 'Two-factor sign-in is needed: sign in again and enter the 6-digit code from your authenticator app.';
+  }
   if (/permission denied|row-level security/i.test(raw)) return 'Your account is not allowed to do that.';
   return raw || 'Something went wrong. Please try again.';
 }
@@ -77,15 +80,37 @@ export function flushOutbox() {
   return api('POST', '/api/outbox/run', {}).catch(() => {});
 }
 
+/** Accounts that sign in with a password and then a 6-digit code (two-factor). */
+export const TWO_FACTOR_ROLES = ['supplier', 'procurement_officer', 'auditor'];
+
 /**
- * Who is signed in: { session, profile, supplier } or null.
+ * Where the signed-in account stands with two-factor sign-in:
+ * { required, satisfied, aal, verified_factor_id, in_grace }.
+ * The database decides; it refuses everything else until the code is entered.
+ */
+export async function twoFactorStatus() {
+  const { data, error } = await sb.rpc('mfa_status');
+  if (error) throw new Error(messageOf(error));
+  return data || { required: false, satisfied: true };
+}
+
+/**
+ * Who is signed in: { session, profile, supplier, codePending } or null.
  * profile.role decides where they go: supplier or procurement_officer.
+ * codePending: the password was right but the 6-digit code is still owed.
  */
 export async function whoAmI() {
   const { data: { session } } = await sb.auth.getSession();
   if (!session) return null;
   const { data: profile } = await sb.from('profiles')
     .select('id, email, full_name, role, department, suspended').eq('id', session.user.id).maybeSingle();
+  if (profile && TWO_FACTOR_ROLES.includes(profile.role)) {
+    const status = await twoFactorStatus().catch(() => ({ required: true, satisfied: false }));
+    // A new company's own registration session may finish without the code (in_grace).
+    if (status.required && !status.satisfied && !status.in_grace) {
+      return { session, profile, supplier: null, codePending: true, twoFactor: status };
+    }
+  }
   let supplier = null;
   if (profile && profile.role === 'supplier') {
     // Lets the database bring the company's registration status up to date first.

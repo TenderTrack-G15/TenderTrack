@@ -3,6 +3,7 @@ package za.ac.tendertrack.ui.screens
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CalendarToday
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Payments
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.SnackbarHostState
@@ -21,12 +22,13 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import za.ac.tendertrack.core.*
 import za.ac.tendertrack.data.ServiceLocator
+import za.ac.tendertrack.data.model.PayablePhase
 import za.ac.tendertrack.data.model.PaymentDraft
 import za.ac.tendertrack.data.model.Tender
 import za.ac.tendertrack.data.model.TenderStatus
 import za.ac.tendertrack.data.repo.PaymentRepository
+import za.ac.tendertrack.data.repo.PhaseRepository
 import za.ac.tendertrack.data.repo.TenderRepository
-import za.ac.tendertrack.data.sample.SampleData
 import za.ac.tendertrack.ui.components.*
 import za.ac.tendertrack.ui.theme.AppColor
 import za.ac.tendertrack.ui.theme.AppType
@@ -35,6 +37,11 @@ import za.ac.tendertrack.ui.viewModelFactory
 data class RecordPaymentUiState(
     val payable: UiState<List<Tender>> = UiState.Loading,
     val tender: Tender? = null,
+    /**
+     * The selected tender's phases marked "Payment can be made" (FR12). Only these
+     * can be paid; the database refuses any other milestone.
+     */
+    val phases: UiState<List<PayablePhase>>? = null,
     val milestone: String? = null,
     val amount: String = "",
     val paidOn: String = "",
@@ -62,7 +69,8 @@ data class RecordPaymentUiState(
 class RecordPaymentViewModel(
     private val preselectedTenderId: String?,
     private val tenderRepository: TenderRepository = ServiceLocator.tenderRepository,
-    private val paymentRepository: PaymentRepository = ServiceLocator.paymentRepository
+    private val paymentRepository: PaymentRepository = ServiceLocator.paymentRepository,
+    private val phaseRepository: PhaseRepository = PhaseRepository.instance
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(RecordPaymentUiState())
@@ -85,14 +93,39 @@ class RecordPaymentViewModel(
                         tender = payable.firstOrNull { t -> t.id == preselectedTenderId } ?: it.tender
                     )
                 }
+                _state.value.tender?.let { loadPhases(it) }
             } catch (e: Exception) {
                 _state.update { it.copy(payable = UiState.Error(e.friendlyMessage())) }
             }
         }
     }
 
-    fun onTender(tender: Tender) = _state.update { it.copy(tender = tender, errors = it.errors - "tender") }
-    fun onMilestone(value: String) = _state.update { it.copy(milestone = value, errors = it.errors - "milestone") }
+    private fun loadPhases(tender: Tender) {
+        _state.update { it.copy(phases = UiState.Loading) }
+        viewModelScope.launch {
+            val result = try {
+                UiState.Success(phaseRepository.payablePhases(tender.id))
+            } catch (e: Exception) {
+                UiState.Error(e.friendlyMessage().lineSequence().first())
+            }
+            // Ignore a late answer for a tender that is no longer selected.
+            if (_state.value.tender?.id == tender.id) _state.update { it.copy(phases = result) }
+        }
+    }
+
+    fun onTender(tender: Tender) {
+        _state.update { it.copy(tender = tender, milestone = null, errors = it.errors - "tender" - "milestone") }
+        loadPhases(tender)
+    }
+
+    /** Picking a phase fills in what is still unpaid on it. */
+    fun onPhase(phase: PayablePhase) = _state.update {
+        it.copy(
+            milestone = phase.phaseName,
+            amount = if (it.amount.isBlank() && phase.outstanding > 0) "%.2f".format(java.util.Locale.US, phase.outstanding) else it.amount,
+            errors = it.errors - "milestone" - "amount"
+        )
+    }
     fun onAmount(value: String) = _state.update { it.copy(amount = value, errors = it.errors - "amount") }
     fun onPaidOn(value: String) = _state.update { it.copy(paidOn = value, errors = it.errors - "paidOn") }
     fun onInvoice(value: String) = _state.update { it.copy(invoice = value, errors = it.errors - "invoice") }
@@ -101,7 +134,7 @@ class RecordPaymentViewModel(
         val current = _state.value
         val errors = buildMap {
             if (current.tender == null) put("tender", "Select the tender being paid")
-            if (current.milestone.isNullOrBlank()) put("milestone", "Select the milestone")
+            if (current.milestone.isNullOrBlank()) put("milestone", "Select the phase being paid")
             Validate.amount(current.amount, "Payment amount")?.let { put("amount", it) }
             Validate.date(current.paidOn, "Payment date")?.let { put("paidOn", it) }
             Validate.required(current.invoice, "Invoice number")?.let { put("invoice", it) }
@@ -225,15 +258,34 @@ fun RecordPaymentScreen(
                     }
                 }
 
-                AppDropdownField(
-                    label = "Milestone",
-                    selected = state.milestone,
-                    options = SampleData.milestones,
-                    optionLabel = { it },
-                    onSelect = viewModel::onMilestone,
-                    placeholder = "Select the milestone being paid",
-                    error = state.errors["milestone"]
-                )
+                when (val phases = state.phases) {
+                    null -> Unit
+                    is UiState.Loading -> LoadingState(message = "Loading phases approved for payment…")
+                    is UiState.Error -> ErrorState(phases.message, onRetry = viewModel::load)
+                    is UiState.Success -> if (phases.data.isEmpty()) {
+                        NoteBanner(
+                            title = "No phase approved for payment",
+                            text = "A payment can only be recorded for a phase that has been verified (the supplier's " +
+                                "and the auditor's photos match) and marked \"Payment can be made\" in Phase checks.",
+                            tone = NoteTone.Warning,
+                            icon = Icons.Default.Lock
+                        )
+                    } else {
+                        AppDropdownField(
+                            label = "Phase",
+                            selected = phases.data.firstOrNull { it.phaseName == state.milestone },
+                            options = phases.data,
+                            optionLabel = { p ->
+                                "${p.phaseNo}. ${p.phaseName} · ${Format.money(p.phaseValue)}" +
+                                    if (p.paid > 0) " (paid ${Format.money(p.paid)})" else ""
+                            },
+                            onSelect = viewModel::onPhase,
+                            placeholder = "Select the phase being paid",
+                            hint = "Only phases marked \"Payment can be made\" are listed.",
+                            error = state.errors["milestone"]
+                        )
+                    }
+                }
 
                 AppTextField(
                     label = "Payment amount (R)",

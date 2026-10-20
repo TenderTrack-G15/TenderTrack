@@ -30,12 +30,20 @@ function logo() {
 export async function chrome(page) {
   let who = null;
   try { who = await whoAmI(); } catch { who = null; }
-  const role = who && who.profile ? who.profile.role : null;
+  // Password entered but not the 6-digit code yet: finish signing in first.
+  if (who && who.codePending && page !== 'signin') {
+    window.location.replace(`/signin?next=${encodeURIComponent(window.location.pathname + window.location.search)}`);
+    return new Promise(() => {}); // the page stops here while the browser moves on
+  }
+  const role = who && who.profile && !who.codePending ? who.profile.role : null;
 
   // Header
   const header = clear(document.getElementById('site-header'));
   const user = h('div', { class: 'header-user' });
-  if (who && who.profile) {
+  if (who && who.profile && who.codePending) {
+    put(user, icon('lock'), h('span', {}, `${who.profile.full_name} · code needed`),
+      h('button', { class: 'btn btn-secondary btn-sm', type: 'button', onclick: () => signOut('/') }, 'Sign out'));
+  } else if (who && who.profile) {
     put(user, 
       icon('person'),
       h('span', {}, who.profile.full_name, who.supplier ? ` · ${who.supplier.company_name}` : '',

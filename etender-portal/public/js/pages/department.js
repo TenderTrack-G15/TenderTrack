@@ -3,7 +3,7 @@
  *   Open for bids   extend the closing date, close bidding (bids stay sealed)
  *   Evaluation      compare the bids and award one
  *   Awarded         the award code: sent, claimed, expired or locked; send a new one;
- *                   review the supplier's deliverable evidence once claimed
+ *                   (contract phases are followed and verified in the TenderTrack app)
  * The award code itself is created and checked by the database; this page
  * never sees it.
  */
@@ -22,7 +22,6 @@ const CLAIM = {
   locked: ['Code locked (5 wrong attempts)', 'danger'],
   no_code: ['No code sent yet', 'neutral'],
 };
-const DELIV = { not_started: ['Not started', 'neutral'], awaiting_verification: ['Evidence submitted', 'warn'], verified: ['Verified', 'success'], overdue: ['Overdue', 'danger'] };
 
 function tabOf(t) {
   if (t.status === 'published') return 'open';
@@ -199,28 +198,6 @@ async function render() {
     }
   }
 
-  function reviewDeliverable(t, d, accept) {
-    if (accept) {
-      confirmDialog({ title: 'Verify this deliverable?', message: `${d.phase_name} (${money(d.phase_value)}) will be marked as verified.`, confirmText: 'Verify' })
-        .then(async (yes) => {
-          if (!yes) return;
-          try { await rpc('review_deliverable', { p_deliverable_id: d.id, p_accept: true, p_comment: '' }); refresh('Deliverable verified.'); } catch (e) { toast(e.message, 'error'); }
-        });
-      return;
-    }
-    const comment = field({ label: 'What is missing?', input: h('textarea', { class: 'textarea', maxlength: '500' }) });
-    modal('Return the evidence', d.phase_name, (close) => {
-      const submit = h('button', { class: 'btn btn-danger', type: 'submit' }, 'Return to supplier');
-      return h('form', { novalidate: true, onsubmit: async (e) => {
-        e.preventDefault();
-        if (comment.input.value.trim().length < 5) { comment.setError('Tell the supplier what is missing (at least 5 characters).'); return; }
-        await busy(submit, async () => {
-          try { await rpc('review_deliverable', { p_deliverable_id: d.id, p_accept: false, p_comment: comment.input.value.trim() }); close(); refresh('Evidence returned to the supplier.'); } catch (err) { comment.setError(err.message); }
-        });
-      } }, comment.wrap, h('div', { class: 'modal-actions' }, h('button', { class: 'btn btn-secondary', type: 'button', onclick: close }, 'Cancel'), submit));
-    });
-  }
-
   // ---- detail ---------------------------------------------------------------
 
   async function drawDetail() {
@@ -297,7 +274,6 @@ async function render() {
     let status = { status: 'no_code' };
     try { status = await rpc('award_code_status', { p_tender_id: t.id }); } catch { /* shown as not sent */ }
     const [claimLabel, claimTone] = CLAIM[status.status] || [status.status, 'neutral'];
-    const deliverables = await rows(sb.from('deliverables').select('id, phase_name, target_date, phase_value, status, evidence_url, evidence_note, evidence_at').eq('tender_id', t.id).order('target_date')).catch(() => []);
     let codeText;
     if (status.status === 'pending') codeText = `Emailed to ${status.sent_to} on ${dateTime(status.issued_at)}. Expires ${date(status.expires_at)} · ${status.attempts_left} attempts left.`;
     else if (status.status === 'claimed') codeText = `The supplier entered the code in TenderTrack on ${dateTime(status.claimed_at)}. The contract is theirs.`;
@@ -316,25 +292,6 @@ async function render() {
           ? h('button', { class: `btn ${status.status === 'pending' ? 'btn-secondary' : 'btn-primary'} mt`, type: 'button', onclick: () => sendCode(t, status.status) },
             icon('send'), status.status === 'no_code' ? 'Send award code' : 'Send a new award code')
           : null),
-      h('h3', { class: 'h2 section' }, 'Deliverables'),
-      deliverables.length
-        ? h('div', { class: 'table-wrap' }, h('table', {},
-          h('thead', {}, h('tr', {}, h('th', {}, 'Phase'), h('th', {}, 'Target'), h('th', { class: 'num' }, 'Value'), h('th', {}, 'Status'), h('th', {}, 'Evidence'), h('th', {}, ''))),
-          h('tbody', {}, deliverables.map((d) => {
-            const [label, tone] = DELIV[d.status] || [d.status, 'neutral'];
-            return h('tr', {},
-              h('td', {}, h('span', { class: 'primary' }, d.phase_name)),
-              h('td', { class: 'nowrap' }, date(d.target_date)),
-              h('td', { class: 'num' }, money(d.phase_value)),
-              h('td', {}, badge(label, tone)),
-              h('td', {}, d.evidence_url && /^https?:\/\//i.test(d.evidence_url) ? h('a', { href: d.evidence_url, target: '_blank', rel: 'noopener noreferrer' }, 'Open link') : null,
-                d.evidence_note ? h('div', { class: 'secondary pre' }, d.evidence_note) : null,
-                d.evidence_at ? h('div', { class: 'secondary' }, dateTime(d.evidence_at)) : null),
-              h('td', {}, d.status === 'awaiting_verification' ? h('div', { class: 'row' },
-                h('button', { class: 'btn btn-primary btn-sm', type: 'button', onclick: () => reviewDeliverable(t, d, true) }, 'Verify'),
-                h('button', { class: 'btn btn-danger btn-sm', type: 'button', onclick: () => reviewDeliverable(t, d, false) }, 'Return')) : null));
-          }))))
-        : h('p', { class: 'meta' }, 'The contract phases are created when the award is made.'),
       h('h3', { class: 'h2 section' }, 'Bids'),
       bidsTable(false));
   }

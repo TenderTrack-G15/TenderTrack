@@ -2,4 +2,6 @@
 <paths>
     <!-- Where generated reports are written before being shared. -->
     <cache-path name="reports" path="reports/" />
+    <!-- Where the camera saves a phase photo before it is checked and sent (deleted after sending). -->
+    <cache-path name="photos" path="photos/" />
 </paths>

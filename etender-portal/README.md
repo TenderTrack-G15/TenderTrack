@@ -29,7 +29,13 @@ Node.js 20 or newer: nothing to install, no XAMPP, no PHP.
 | Person | On this portal | In TenderTrack |
 |---|---|---|
 | Supplier | Registers the company (once), bids, sees bid results and the demo mailbox | Finds and follows tenders, **claims an award with the emailed code**, updates deliverables |
-| Procurement officer | Closes bidding, compares bids, awards, re-sends a code, verifies deliverables | Registers and publishes tenders, verifies supplier registrations |
+| Procurement officer | Closes bidding, compares bids, awards, re-sends a code | Registers and publishes tenders, verifies supplier registrations, verifies deliverables |
+
+Suppliers and procurement officers sign in here with their password and then a
+**6-digit code from an authenticator app** (two-factor sign-in, the same
+authenticator as in the TenderTrack app). A company that has just registered
+here can finish its registration without the code; the code is asked for at its
+next sign-in.
 
 ## The award code
 

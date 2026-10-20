@@ -1,17 +1,12 @@
 package za.ac.tendertrack.ui.screens.supplier
 
-import android.content.Intent
-import android.net.Uri
-import android.widget.Toast
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -25,31 +20,44 @@ import za.ac.tendertrack.core.Format
 import za.ac.tendertrack.core.UiState
 import za.ac.tendertrack.data.model.*
 import za.ac.tendertrack.data.repo.AwardRepository
+import za.ac.tendertrack.data.repo.PhaseRepository
 import za.ac.tendertrack.ui.components.*
+import za.ac.tendertrack.ui.screens.phases.*
 import za.ac.tendertrack.ui.theme.AppColor
 import za.ac.tendertrack.ui.theme.AppType
 import za.ac.tendertrack.ui.theme.Dimens
 import za.ac.tendertrack.ui.viewModelFactory
 
-/** An awarded contract and its delivery phases. */
-data class ContractData(val award: SupplierAward, val phases: List<ContractDeliverable>) {
-    val verified: Int get() = phases.count { it.status == ContractPhaseStatus.VERIFIED }
-    val awaiting: Int get() = phases.count { it.status == ContractPhaseStatus.AWAITING_VERIFICATION }
+/*
+ * The supplier's contract: five set phases, each proved with a photo taken in
+ * the app. Only the camera can be used: there is no upload or import.
+ *
+ * Only the current phase can be photographed. The next one opens when the
+ * procurement officer has compared the supplier's photo with the auditor's
+ * site photo and verified the phase. The database enforces both rules.
+ */
+
+/** An awarded contract and its phases. */
+data class ContractData(val award: SupplierAward, val phases: List<ContractPhase>) {
+    val verified: Int get() = phases.count { it.state.isDone }
+    val paymentApproved: Int get() = phases.count { it.state == PhaseState.PAYMENT_APPROVED }
     val progress: Float get() = if (phases.isEmpty()) 0f else verified.toFloat() / phases.size
+
+    /** The phase being worked on: the first one not yet verified. */
+    val current: ContractPhase? get() = phases.filter { !it.state.isDone }.minByOrNull { it.phaseNo }
 }
 
 data class ContractUiState(
     val data: UiState<ContractData> = UiState.Loading,
-    /** The phase whose evidence form is open, if any. */
-    val editing: String? = null,
-    val form: EvidenceForm = EvidenceForm(),
-    val errors: Map<String, String> = emptyMap(),
+    /** The photo just taken, shown for checking before it is sent. */
+    val photo: PreparedPhoto? = null,
     val action: ActionState = ActionState.Idle
 )
 
 class ContractViewModel(
     private val tenderId: String,
-    private val repository: AwardRepository = AwardRepository.instance
+    private val awards: AwardRepository = AwardRepository.instance,
+    private val phases: PhaseRepository = PhaseRepository.instance
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(ContractUiState())
@@ -63,61 +71,45 @@ class ContractViewModel(
     }
 
     private suspend fun fetch(): UiState<ContractData> = try {
-        val award = repository.awards().firstOrNull { it.tenderId == tenderId }
+        val award = awards.awards().firstOrNull { it.tenderId == tenderId }
             ?: error("This tender was not awarded to your company.")
-        UiState.Success(ContractData(award, repository.deliverables(tenderId)))
+        UiState.Success(ContractData(award, phases.supplierPhases(tenderId)))
     } catch (e: Exception) {
-        UiState.Error(e.supplierMessage())
+        UiState.Error(e.phaseMessage())
     }
 
-    fun startEvidence(phase: ContractDeliverable) = _state.update {
-        // A returned phase starts with the earlier link, so the supplier can correct it.
-        it.copy(editing = phase.id, form = EvidenceForm(link = phase.evidenceUrl.orEmpty()), errors = emptyMap(),
-            action = ActionState.Idle)
-    }
+    fun onPhoto(photo: PreparedPhoto) = _state.update { it.copy(photo = photo, action = ActionState.Idle) }
+    fun onCameraError(message: String) = _state.update { it.copy(action = ActionState.Failed(message)) }
+    fun discardPhoto() = _state.update { it.copy(photo = null) }
 
-    fun cancel() = _state.update { it.copy(editing = null, errors = emptyMap()) }
-
-    fun onLink(value: String) = _state.update { it.copy(form = it.form.copy(link = value), errors = it.errors - "link") }
-    fun onNote(value: String) = _state.update { it.copy(form = it.form.copy(note = value), errors = it.errors - "note" - "link") }
-
-    fun submit() {
+    fun send(phase: ContractPhase) {
         val current = _state.value
-        val id = current.editing ?: return
+        val photo = current.photo ?: return
         if (current.action is ActionState.Running) return
-        val errors = current.form.errors()
-        if (errors.isNotEmpty()) {
-            _state.update { it.copy(errors = errors) }
-            return
-        }
         _state.update { it.copy(action = ActionState.Running) }
         viewModelScope.launch {
             try {
-                val saved = repository.submitEvidence(id, current.form)
+                phases.submitSupplierPhoto(phase.id, photo.base64)
                 val refreshed = fetch()
                 _state.update {
                     it.copy(
-                        data = refreshed, editing = null, form = EvidenceForm(),
-                        action = ActionState.Succeeded("Evidence for \"${saved.phaseName}\" submitted. The department will verify it.")
+                        data = refreshed, photo = null,
+                        action = ActionState.Succeeded(
+                            "Photo for \"${phase.phaseName}\" sent. An auditor will visit the site, then the " +
+                                "procurement officer compares the two photos."
+                        )
                     )
                 }
             } catch (e: Exception) {
-                _state.update { it.copy(action = ActionState.Failed(e.supplierMessage())) }
+                _state.update { it.copy(action = ActionState.Failed(e.phaseMessage())) }
             }
         }
     }
 }
 
-fun ContractPhaseStatus.tone(): BadgeTone = when (this) {
-    ContractPhaseStatus.NOT_STARTED -> BadgeTone.Neutral
-    ContractPhaseStatus.AWAITING_VERIFICATION -> BadgeTone.Warning
-    ContractPhaseStatus.VERIFIED -> BadgeTone.Success
-    ContractPhaseStatus.OVERDUE -> BadgeTone.Danger
-}
-
 /**
- * Contract deliverables: once the award is claimed, the supplier submits
- * evidence for each phase and the department verifies or returns it.
+ * Contract phases: once the award is claimed, the supplier photographs each
+ * phase in turn and the department signs it off.
  */
 @Composable
 fun ContractScreen(
@@ -131,7 +123,11 @@ fun ContractScreen(
     )
     val state by viewModel.state.collectAsState()
 
-    AppScaffold(title = "Contract", onBack = onBack) {
+    AppScaffold(
+        title = "Contract",
+        onBack = onBack,
+        actions = listOf(TopBarAction(Icons.Default.Refresh, "Refresh") { viewModel.load() })
+    ) {
         when (val result = state.data) {
             is UiState.Loading -> LoadingState(message = "Loading the contract…")
             is UiState.Error -> ErrorState(result.message, onRetry = viewModel::load)
@@ -150,7 +146,7 @@ private fun ContractBody(
     val award = data.award
     ScreenHeading(
         eyebrow = award.referenceNumber,
-        title = "Contract deliverables",
+        title = "Contract phases",
         subtitle = "${award.title} · ${award.department}",
         trailing = { StatusBadge(award.claimStatus.displayName, award.claimStatus.tone()) }
     )
@@ -159,7 +155,7 @@ private fun ContractBody(
         NoteBanner(
             title = "Claim the award first",
             text = "Enter the award code from your email before you start work. Until the award is claimed, " +
-                "its deliverables cannot be updated.",
+                "no phase can be started.",
             tone = NoteTone.Warning,
             icon = Icons.Default.Lock
         )
@@ -169,14 +165,13 @@ private fun ContractBody(
     }
 
     Row(horizontalArrangement = Arrangement.spacedBy(Dimens.GridGap)) {
-        StatTile("Verified", "${data.verified} of ${data.phases.size}", Modifier.weight(1f), "Signed off by the department")
-        StatTile(
-            "Awaiting verification", "${data.awaiting}", Modifier.weight(1f), "Evidence submitted"
-        )
+        StatTile("Phases verified", "${data.verified} of ${data.phases.size}", Modifier.weight(1f), "Signed off by the department")
+        StatTile("Approved for payment", "${data.paymentApproved}", Modifier.weight(1f), "Payment can be made")
     }
     ProgressBar(data.progress)
     Text(
-        "Contract value ${award.awardedValue?.let { Format.money(it) } ?: "—"} · claimed ${Format.date(award.claimedAt)}",
+        "Contract value ${award.awardedValue?.let { Format.money(it) } ?: "—"}" +
+            (award.claimedAt?.let { " · claimed ${Format.date(it)}" } ?: ""),
         style = AppType.Meta
     )
 
@@ -186,122 +181,122 @@ private fun ContractBody(
         else -> Unit
     }
 
-    SectionHeader("Phases")
-    if (data.phases.isEmpty()) {
-        EmptyState(
+    val current = data.current
+    when {
+        data.phases.isEmpty() -> EmptyState(
             title = "No phases yet",
-            message = "The department has not set this contract's phases yet.",
+            message = "The contract's phases are created when the award is made. Tap refresh at the top to check again.",
             icon = Icons.Default.TaskAlt
         )
-    } else {
-        Column(verticalArrangement = Arrangement.spacedBy(Dimens.ListGap)) {
-            data.phases.forEach { phase ->
-                PhaseCard(
-                    phase = phase,
-                    claimed = award.isClaimed,
-                    editing = state.editing == phase.id,
-                    state = state,
-                    viewModel = viewModel
-                )
-            }
-        }
+        current == null -> NoteBanner(
+            title = "All phases verified",
+            text = "Every phase of this contract has been verified by the procurement officer.",
+            tone = NoteTone.Success,
+            icon = Icons.Default.Verified
+        )
+        else -> CurrentPhaseCard(current, award.isClaimed, state, viewModel)
+    }
+
+    if (data.phases.isNotEmpty()) {
+        SectionHeader("All phases")
+        PhaseList(data.phases, forOfficer = false, selectedId = current?.id)
+        NoteBanner(
+            text = "Each phase opens only after the procurement officer has verified the one before it. Payment " +
+                "for a phase is released after it is verified.",
+            tone = NoteTone.Neutral,
+            icon = Icons.Default.Info
+        )
     }
 }
 
 @Composable
-private fun PhaseCard(
-    phase: ContractDeliverable,
+private fun CurrentPhaseCard(
+    phase: ContractPhase,
     claimed: Boolean,
-    editing: Boolean,
     state: ContractUiState,
     viewModel: ContractViewModel
 ) {
-    val context = LocalContext.current
-    AppCard {
+    val openCamera = rememberCameraCapture(onPhoto = viewModel::onPhoto, onError = viewModel::onCameraError)
+    val sending = state.action is ActionState.Running
+
+    AppCard(accent = AppColor.Ink) {
         CardHeader(
-            title = phase.phaseName,
-            subtitle = "Due ${Format.date(phase.targetDate)} · ${Format.money(phase.phaseValue)}",
-            trailing = { StatusBadge(phase.status.displayName, phase.status.tone()) }
+            title = phase.heading,
+            subtitle = "${phase.valueLine()} · due ${Format.date(phase.targetDate)}",
+            trailing = { StatusBadge(phase.state.supplierLabel, phase.state.tone(), showDot = false) }
         )
-
-        if (phase.wasReturned) {
-            Spacer(Modifier.height(Dimens.SpaceSm))
-            NoteBanner(
-                title = "Returned by the department",
-                text = phase.evidenceNote.orEmpty().removePrefix("Returned:").trim().lineSequence().first(),
-                tone = NoteTone.Danger,
-                icon = Icons.Default.ErrorOutline
-            )
-        } else if (phase.evidenceAt != null) {
-            Spacer(Modifier.height(Dimens.SpaceSm))
-            KeyValueRow("Evidence submitted", Format.dateTime(phase.evidenceAt), showDivider = false)
-            phase.evidenceNote?.takeIf { it.isNotBlank() }?.let {
-                Text(it, style = AppType.Body.copy(color = AppColor.InkSoft))
-            }
-            phase.evidenceUrl?.let { url ->
-                TextAction(text = "Open evidence link", color = AppColor.InfoInk, onClick = {
-                    runCatching {
-                        context.startActivity(Intent(Intent.ACTION_VIEW).apply { data = Uri.parse(url) })
-                    }.onFailure {
-                        Toast.makeText(context, "Could not open that link.", Toast.LENGTH_SHORT).show()
-                    }
-                })
-            }
-        }
-
         Spacer(Modifier.height(Dimens.SpaceSm))
-        when {
-            phase.status == ContractPhaseStatus.VERIFIED ->
-                Text("Verified on ${Format.date(phase.verifiedAt)}.", style = AppType.Meta)
-            phase.status == ContractPhaseStatus.AWAITING_VERIFICATION ->
-                Text("Waiting for the department to verify this evidence.", style = AppType.Meta)
-            !claimed ->
-                Text("Available once the award is claimed.", style = AppType.Meta)
-            editing -> EvidenceFields(state, viewModel)
-            phase.canSubmit -> SecondaryButton(
-                text = if (phase.wasReturned) "Submit corrected evidence" else "Submit evidence",
-                icon = Icons.Default.Upload,
-                onClick = { viewModel.startEvidence(phase) }
-            )
-        }
+        Text("What to photograph", style = AppType.Label)
+        Text(phase.guidance, style = AppType.Body.copy(color = AppColor.InkSoft))
     }
-}
 
-@Composable
-private fun EvidenceFields(state: ContractUiState, viewModel: ContractViewModel) {
-    val running = state.action is ActionState.Running
-    Column(verticalArrangement = Arrangement.spacedBy(Dimens.SpaceMd)) {
-        AppTextField(
-            label = "Link to the evidence",
-            value = state.form.link,
-            onValueChange = viewModel::onLink,
-            placeholder = "https://",
-            hint = "A delivery note, photos or a signed report stored online (Google Drive, OneDrive).",
-            error = state.errors["link"],
-            leadingIcon = Icons.Default.Link,
-            keyboardType = KeyboardType.Uri,
-            enabled = !running
+    if (phase.state == PhaseState.RETURNED && phase.returnedReason.isNotBlank()) {
+        NoteBanner(
+            title = "Returned by the procurement officer",
+            text = phase.returnedReason,
+            tone = NoteTone.Danger,
+            icon = Icons.Default.Replay
         )
-        AppTextField(
-            label = "What was delivered",
-            value = state.form.note,
-            onValueChange = viewModel::onNote,
-            placeholder = "e.g. 42 switches delivered and signed for by the district IT manager",
-            error = state.errors["note"],
-            singleLine = false,
-            minHeight = 110.dp,
-            enabled = !running
-        )
-        ButtonRow(
-            left = { SecondaryButton(text = "Cancel", modifier = Modifier.weight(1f), enabled = !running, onClick = viewModel::cancel) },
-            right = {
+    }
+
+    when {
+        !claimed -> Unit
+        phase.canTakePhoto -> {
+            val photo = state.photo
+            if (photo == null) {
                 PrimaryButton(
-                    text = "Submit",
-                    modifier = Modifier.weight(1f),
-                    loading = running,
-                    onClick = viewModel::submit
+                    text = if (phase.state == PhaseState.RETURNED) "Take a new photo" else "Take photo",
+                    icon = Icons.Default.PhotoCamera,
+                    onClick = openCamera
+                )
+                Text(
+                    "Opens the camera. Photos can't be uploaded or chosen from the gallery: the photo must be " +
+                        "taken now, on site.",
+                    style = AppType.Tiny
+                )
+            } else {
+                PhotoFrame(
+                    label = "Your photo",
+                    bitmap = photo.preview,
+                    caption = "Check it shows the work clearly before sending.",
+                    modifier = Modifier.fillMaxWidth(0.7f)
+                )
+                PrimaryButton(
+                    text = "Send photo",
+                    icon = Icons.AutoMirrored.Filled.Send,
+                    loading = sending,
+                    onClick = { viewModel.send(phase) }
+                )
+                SecondaryButton(
+                    text = "Retake",
+                    icon = Icons.Default.PhotoCamera,
+                    enabled = !sending,
+                    onClick = {
+                        viewModel.discardPhoto()
+                        openCamera()
+                    }
                 )
             }
-        )
+        }
+        phase.state == PhaseState.AWAITING_SITE_CHECK -> {
+            NoteBanner(
+                title = "Photo sent",
+                text = "An auditor will visit the site and take their own photo of this phase. The procurement " +
+                    "officer then compares the two.",
+                tone = NoteTone.Info,
+                icon = Icons.Default.HourglassTop
+            )
+            StoredPhotoFrame("Your photo", phase.supplierPhotoId, Modifier.fillMaxWidth(0.7f))
+        }
+        phase.state == PhaseState.AWAITING_OFFICER -> {
+            NoteBanner(
+                title = "Being checked",
+                text = "The auditor has visited the site. The procurement officer is comparing your photo with " +
+                    "the site photo. You can start the next phase once this one is verified.",
+                tone = NoteTone.Info,
+                icon = Icons.Default.HourglassTop
+            )
+            StoredPhotoFrame("Your photo", phase.supplierPhotoId, Modifier.fillMaxWidth(0.7f))
+        }
     }
 }

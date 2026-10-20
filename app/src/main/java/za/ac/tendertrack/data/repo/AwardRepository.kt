@@ -1,9 +1,7 @@
 package za.ac.tendertrack.data.repo
 
 import io.github.jan.supabase.SupabaseClient
-import io.github.jan.supabase.postgrest.from
 import io.github.jan.supabase.postgrest.postgrest
-import io.github.jan.supabase.postgrest.query.Order
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.buildJsonObject
@@ -13,12 +11,13 @@ import za.ac.tendertrack.data.SupabaseModule
 import za.ac.tendertrack.data.model.*
 
 /**
- * A supplier's awards: claiming one with the emailed award code, then keeping
- * the contract's deliverables up to date (supabase/etender_awards.sql).
+ * A supplier's awards: claiming one with the emailed award code
+ * (supabase/etender_awards.sql). The contract's phases and their photo proof
+ * are in PhaseRepository.
  *
  * Every rule is enforced by the database, not by this class: only the awarded
  * company can claim, a wrong code counts as an attempt, five wrong codes lock
- * it, and deliverables cannot be updated before the award is claimed.
+ * it, and no phase can be started before the award is claimed.
  */
 interface AwardRepository {
     /** Tenders awarded to the signed-in supplier's company, newest first. */
@@ -26,12 +25,6 @@ interface AwardRepository {
 
     /** Sends the code to the database, which compares it with its hashed copy. */
     suspend fun claim(tenderId: String, code: String): ClaimResult
-
-    /** The contract's phases, in delivery order. */
-    suspend fun deliverables(tenderId: String): List<ContractDeliverable>
-
-    /** Evidence for one phase; the department then verifies or returns it. */
-    suspend fun submitEvidence(deliverableId: String, form: EvidenceForm): ContractDeliverable
 
     companion object {
         /** The real database when Supabase is configured, sample data otherwise. */
@@ -43,10 +36,8 @@ interface AwardRepository {
 
 /** Database names used here. Kept with the repository so no other file needs editing. */
 private object AwardApi {
-    const val DELIVERABLES = "deliverables"
     const val SUPPLIER_AWARDS = "supplier_awards"
     const val CLAIM_AWARD = "claim_award"
-    const val SUBMIT_DELIVERABLE_EVIDENCE = "submit_deliverable_evidence"
 }
 
 // ---------------------------------------------------------------------------
@@ -68,27 +59,6 @@ class SupabaseAwardRepository(private val client: SupabaseClient) : AwardReposit
             }
         ).decodeAs<ClaimResult>()
     }
-
-    override suspend fun deliverables(tenderId: String): List<ContractDeliverable> = withContext(Dispatchers.IO) {
-        client.from(AwardApi.DELIVERABLES)
-            .select {
-                filter { eq("tender_id", tenderId) }
-                order("target_date", Order.ASCENDING)
-            }
-            .decodeList<ContractDeliverable>()
-    }
-
-    override suspend fun submitEvidence(deliverableId: String, form: EvidenceForm): ContractDeliverable =
-        withContext(Dispatchers.IO) {
-            client.postgrest.rpc(
-                AwardApi.SUBMIT_DELIVERABLE_EVIDENCE,
-                buildJsonObject {
-                    put("p_deliverable_id", deliverableId)
-                    put("p_evidence_url", form.link.trim().ifBlank { null })
-                    put("p_note", form.note.trim())
-                }
-            ).decodeAs<ContractDeliverable>()
-        }
 }
 
 // ---------------------------------------------------------------------------
@@ -112,13 +82,10 @@ class SampleAwardRepository : AwardRepository {
         attemptsLeft = 5, sentTo = "o•••s@infratech.co.za"
     )
 
-    private val phases = mutableListOf(
-        ContractDeliverable("p-1", "t-001", "Core switching delivered", "2026-11-30", 5_000_000.0),
-        ContractDeliverable("p-2", "t-001", "Site installation at 18 offices", "2027-02-28", 8_000_000.0),
-        ContractDeliverable("p-3", "t-001", "Handover and as-built documentation", "2027-04-30", 4_950_000.0)
-    )
+    /** Used by the sample phases: no phase can start before the award is claimed. */
+    fun isClaimed(tenderId: String): Boolean = tenderId != award.tenderId || award.isClaimed
 
-    override suspend fun awards(): List<SupplierAward> = listOf(award.withCounts())
+    override suspend fun awards(): List<SupplierAward> = listOf(award.withPhases())
 
     override suspend fun claim(tenderId: String, code: String): ClaimResult {
         require(tenderId == award.tenderId) { "This tender was not awarded to your company." }
@@ -150,31 +117,22 @@ class SampleAwardRepository : AwardRepository {
         }
     }
 
-    override suspend fun deliverables(tenderId: String): List<ContractDeliverable> =
-        phases.filter { it.tenderId == tenderId }
-
-    override suspend fun submitEvidence(deliverableId: String, form: EvidenceForm): ContractDeliverable {
-        check(award.isClaimed) { "Claim this award with the code from your email before updating its deliverables." }
-        val errors = form.errors()
-        require(errors.isEmpty()) { errors.values.first() }
-        val index = phases.indexOfFirst { it.id == deliverableId }
-        require(index >= 0) { "That deliverable no longer exists." }
-        check(phases[index].status != ContractPhaseStatus.VERIFIED) { "This deliverable has already been verified." }
-        val updated = phases[index].copy(
-            status = ContractPhaseStatus.AWAITING_VERIFICATION,
-            evidenceUrl = form.link.trim().ifBlank { null },
-            evidenceNote = form.note.trim(),
-            evidenceAt = Format.nowIso()
+    private suspend fun SupplierAward.withPhases(): SupplierAward {
+        if (!isClaimed) return this
+        val phases = PhaseRepository.instance.supplierPhases(tenderId)
+        val current = phases.filter { !it.state.isDone }.minByOrNull { it.phaseNo }
+        return copy(
+            deliverablesTotal = phases.size,
+            deliverablesVerified = phases.count { it.state.isDone },
+            deliverablesAwaiting = phases.count {
+                it.state == PhaseState.AWAITING_SITE_CHECK || it.state == PhaseState.AWAITING_OFFICER
+            },
+            currentPhaseNo = current?.phaseNo,
+            currentPhaseName = current?.phaseName,
+            currentPhaseState = current?.state,
+            phasesPaymentApproved = phases.count { it.paymentApprovedAt != null }
         )
-        phases[index] = updated
-        return updated
     }
-
-    private fun SupplierAward.withCounts() = copy(
-        deliverablesTotal = if (isClaimed) phases.size else 0,
-        deliverablesVerified = phases.count { it.status == ContractPhaseStatus.VERIFIED },
-        deliverablesAwaiting = phases.count { it.status == ContractPhaseStatus.AWAITING_VERIFICATION }
-    )
 
     companion object {
         const val SAMPLE_CODE = "1234567890"

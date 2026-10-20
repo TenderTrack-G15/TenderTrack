@@ -12,6 +12,8 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -19,6 +21,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import za.ac.tendertrack.data.model.DashboardSummary
 import za.ac.tendertrack.data.model.Profile
+import za.ac.tendertrack.data.repo.OfficerAlertsStore
 import za.ac.tendertrack.ui.components.*
 import za.ac.tendertrack.ui.theme.AppColor
 import za.ac.tendertrack.ui.theme.AppType
@@ -29,7 +32,9 @@ import za.ac.tendertrack.ui.theme.Dimens
  *
  * Grouped rather than flat, and it carries the four areas the review found
  * missing: Record Payment and Fund Utilisation under Finance, and Flags &
- * Compliance and Reports under Oversight.
+ * Compliance and Reports under Oversight. Phase checks (photo proof of each
+ * contract phase) sits with the awards; its count is the phases waiting for
+ * the officer.
  */
 @Composable
 fun AppDrawer(
@@ -39,6 +44,8 @@ fun AppDrawer(
     onNavigate: (String) -> Unit,
     onSignOut: () -> Unit
 ) {
+    val alerts by OfficerAlertsStore.alerts.collectAsState()
+
     ModalDrawerSheet(
         drawerContainerColor = AppColor.Surface,
         drawerContentColor = AppColor.Ink,
@@ -84,6 +91,12 @@ fun AppDrawer(
                 DrawerItem("Award Management", Icons.Default.EmojiEvents, false) {
                     onNavigate(Routes.TENDERS)
                 }
+                DrawerItem(
+                    "Phase checks", Icons.Default.PhotoCamera,
+                    currentRoute == PhaseRoutes.CHECKS || currentRoute == PhaseRoutes.CHECK,
+                    badge = alerts?.officerActions ?: 0,
+                    badgeTone = BadgeTone.Danger
+                ) { onNavigate(PhaseRoutes.checks()) }
 
                 DrawerGroup("Finance")
                 DrawerItem("Record Payment", Icons.Default.Payments, currentRoute == Routes.RECORD_PAYMENT) {

@@ -121,6 +121,13 @@ fun TenderTrackNavGraph(navController: NavHostController = rememberNavController
                 onSignOut = signOutToWelcome
             )
 
+            // Procurement officer: Phase checks — see PhaseNavGraph.kt
+            phaseGraph(
+                navController = navController,
+                onMenu = { scope.launch { drawerState.open() } },
+                onChanged = { dashboardViewModel.load() }
+            )
+
             composable(Routes.SIGN_IN) {
                 SignInScreen(
                     audience = za.ac.tendertrack.ui.screens.SignInAudience.GOVERNMENT,
@@ -147,6 +154,7 @@ fun TenderTrackNavGraph(navController: NavHostController = rememberNavController
                     onOpenTenders = { go(Routes.TENDERS) },
                     onOpenFunds = { go(Routes.FUND_UTILISATION) },
                     onOpenBudget = { navController.navigate(Routes.BUDGET_ALLOCATION) },
+                    onOpenPhaseChecks = { go(PhaseRoutes.checks()) },
                     viewModel = dashboardViewModel
                 )
             }
@@ -155,7 +163,8 @@ fun TenderTrackNavGraph(navController: NavHostController = rememberNavController
                 TenderListScreen(
                     onMenu = { scope.launch { drawerState.open() } },
                     onOpenTender = { id -> navController.navigate(Routes.tenderDetail(id)) },
-                    onRegisterTender = { navController.navigate(Routes.tenderForm()) }
+                    onRegisterTender = { navController.navigate(Routes.tenderForm()) },
+                    onOpenPhaseChecks = { id -> navController.navigate(PhaseRoutes.checks(id)) }
                 )
             }
 

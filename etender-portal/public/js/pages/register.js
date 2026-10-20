@@ -476,6 +476,7 @@ async function render() {
       h('ol', { class: 'bullets' },
         h('li', {}, 'A procurement officer checks your details and documents in TenderTrack and verifies your registration.'),
         h('li', {}, `Register for TenderTrack too: in the app, open Supplier login → Register an account, and enter ${(finishing ? who.profile.email : data.email).trim()}, your password, CSD number ${data.csd_number} and registration number ${data.registration_number}. A 6-digit code is emailed to ${data.contact_email} to confirm it. Both registrations are needed to claim an award.`),
+        h('li', {}, 'Next time you sign in, here or in the app, you will set up two-factor sign-in: scan a QR code with an authenticator app (such as Google Authenticator or Microsoft Authenticator), then enter its 6-digit code each time.'),
         h('li', {}, 'Bid for tenders on this portal. A tender can only be awarded to a verified supplier.'),
         h('li', {}, `If you are awarded a tender, a 10-digit award code is emailed to ${data.contact_email}. Enter it in TenderTrack to claim the contract.`)),
       h('div', { class: 'row mt' }, h('a', { class: 'btn btn-primary', href: '/tenders' }, 'Find a tender'), h('a', { class: 'btn btn-secondary', href: '/account' }, 'My bids & awards')));

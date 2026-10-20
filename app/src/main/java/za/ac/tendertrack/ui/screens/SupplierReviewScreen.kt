@@ -4,6 +4,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
@@ -22,6 +24,8 @@ import za.ac.tendertrack.core.*
 import za.ac.tendertrack.data.ServiceLocator
 import za.ac.tendertrack.data.model.Supplier
 import za.ac.tendertrack.data.model.SupplierVerificationStatus
+import za.ac.tendertrack.data.repo.OfficerAlertsStore
+import za.ac.tendertrack.data.repo.PhaseRepository
 import za.ac.tendertrack.data.repo.SupplierRepository
 import za.ac.tendertrack.ui.components.*
 import za.ac.tendertrack.ui.theme.AppColor
@@ -38,13 +42,38 @@ data class SupplierReviewUiState(
 
 class SupplierReviewViewModel(
     private val supplierId: String,
-    private val repository: SupplierRepository = ServiceLocator.supplierRepository
+    private val repository: SupplierRepository = ServiceLocator.supplierRepository,
+    private val phases: PhaseRepository = PhaseRepository.instance
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(SupplierReviewUiState())
     val state: StateFlow<SupplierReviewUiState> = _state.asStateFlow()
 
-    init { load() }
+    /** How many documents this company sent since an officer last checked it. */
+    val newDocuments: StateFlow<Int> get() = _newDocuments
+    private val _newDocuments = MutableStateFlow(OfficerAlertsStore.alerts.value?.newDocumentsFor(supplierId) ?: 0)
+
+    init {
+        load()
+        viewModelScope.launch {
+            OfficerAlertsStore.refresh(phases)?.let { _newDocuments.value = it.newDocumentsFor(supplierId) }
+        }
+    }
+
+    /** The documents have been looked at: clears the count without verifying or rejecting the company. */
+    fun markDocumentsChecked() {
+        _state.update { it.copy(action = ActionState.Running) }
+        viewModelScope.launch {
+            try {
+                phases.markDocumentsChecked(supplierId)
+                _newDocuments.value = 0
+                OfficerAlertsStore.refresh(phases)
+                _state.update { it.copy(action = ActionState.Succeeded("Documents marked as checked.")) }
+            } catch (e: Exception) {
+                _state.update { it.copy(action = ActionState.Failed(e.friendlyMessage().lineSequence().first())) }
+            }
+        }
+    }
 
     fun load() {
         _state.update { it.copy(supplier = UiState.Loading) }
@@ -96,6 +125,9 @@ class SupplierReviewViewModel(
                         action = ActionState.Succeeded(message)
                     )
                 }
+                // Deciding on a registration counts as checking its documents (the database records it).
+                _newDocuments.value = 0
+                OfficerAlertsStore.refresh(phases)
                 onDone()
             } catch (e: Exception) {
                 _state.update { it.copy(action = ActionState.Failed(e.friendlyMessage())) }
@@ -117,6 +149,7 @@ fun SupplierReviewScreen(
         factory = viewModelFactory { SupplierReviewViewModel(supplierId) }
     )
     val state by viewModel.state.collectAsState()
+    val newDocuments by viewModel.newDocuments.collectAsState()
     val snackbar = remember { SnackbarHostState() }
 
     LaunchedEffect(state.action) {
@@ -175,6 +208,22 @@ fun SupplierReviewScreen(
                             else -> AppColor.SuccessInk
                         },
                         showDivider = false
+                    )
+                }
+
+                if (newDocuments > 0) {
+                    NoteBanner(
+                        title = "$newDocuments new ${if (newDocuments == 1) "document" else "documents"}",
+                        text = "This company sent documents on the eTender portal since a procurement officer last " +
+                            "checked it. Check them, then verify or reject the registration, or mark them as checked.",
+                        tone = NoteTone.Warning,
+                        icon = Icons.Default.Description
+                    )
+                    SecondaryButton(
+                        "Mark documents as checked",
+                        icon = Icons.Default.DoneAll,
+                        enabled = !busy,
+                        onClick = viewModel::markDocumentsChecked
                     )
                 }
 

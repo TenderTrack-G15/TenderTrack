@@ -23,6 +23,7 @@ import za.ac.tendertrack.data.ServiceLocator
 import za.ac.tendertrack.data.model.*
 import za.ac.tendertrack.data.repo.AuthRepository
 import za.ac.tendertrack.data.repo.RegistrationRepository
+import za.ac.tendertrack.data.repo.TwoFactorRepository
 import za.ac.tendertrack.data.repo.SampleRegistrationRepository
 import za.ac.tendertrack.ui.components.*
 import za.ac.tendertrack.ui.theme.AppColor
@@ -40,6 +41,9 @@ import za.ac.tendertrack.ui.theme.Dimens
  *      emailed to the company's contact address.
  * A stolen password alone is therefore not enough to get a company into
  * TenderTrack, and the database refuses awards until both are done.
+ *
+ * Signing in with the portal account also needs the 6-digit code from an
+ * authenticator app (two-factor sign-in), as everywhere else in TenderTrack.
  */
 
 enum class SignUpStep { DETAILS, CODE, DONE }
@@ -63,12 +67,16 @@ data class SupplierSignUpUiState(
     val formError: String? = null,
     val notice: String? = null,
     val doneMessage: String = "",
-    val submitting: Boolean = false
+    val submitting: Boolean = false,
+    /** Set after the portal password while the 6-digit code is still needed. */
+    val twoFactor: TwoFactorUi? = null
 )
 
 class SupplierSignUpViewModel(
     private val auth: AuthRepository = ServiceLocator.authRepository,
-    private val registration: RegistrationRepository = RegistrationRepository.instance
+    private val registration: RegistrationRepository = RegistrationRepository.instance,
+    private val twoFactor: TwoFactorRepository = TwoFactorRepository.instance,
+    private val gate: TwoFactorGate = TwoFactorGate(twoFactor)
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(SupplierSignUpUiState())
@@ -81,6 +89,12 @@ class SupplierSignUpViewModel(
         viewModelScope.launch {
             val profile = runCatching { auth.currentProfile() }.getOrNull()
             if (profile?.role != UserRole.SUPPLIER) {
+                _state.update { it.copy(checking = false) }
+                return@launch
+            }
+            // A session left from an unfinished sign-in (no code entered) can read nothing: start again.
+            if (runCatching { twoFactor.sessionOwesCode(profile.role) }.getOrDefault(false)) {
+                runCatching { auth.signOut() }
                 _state.update { it.copy(checking = false) }
                 return@launch
             }
@@ -124,19 +138,79 @@ class SupplierSignUpViewModel(
         }
         _state.update { it.copy(submitting = true, formError = null) }
         viewModelScope.launch {
-            try {
-                if (_state.value.signedInAs == null) signInWithPortalAccount(s.email, s.password) ?: return@launch
-                val sent = registration.start(s.csdNumber, s.registrationNumber)
-                _state.update {
-                    if (sent.already) it.copy(submitting = false, step = SignUpStep.DONE,
-                        doneMessage = "You are already registered for TenderTrack.")
-                    else it.copy(submitting = false, step = SignUpStep.CODE, sentTo = sent.sentTo, code = "",
-                        codeError = null, needNewCode = false, notice = "A 6-digit code was sent to ${sent.sentTo}.")
+            if (_state.value.signedInAs == null) {
+                signInWithPortalAccount(s.email, s.password) ?: return@launch
+                // Then the 6-digit code from the authenticator app (set up the first time).
+                val step = try {
+                    gate.begin(UserRole.SUPPLIER)
+                } catch (e: Exception) {
+                    signOutHere()
+                    _state.update { it.copy(submitting = false, formError = e.twoFactorProblem()) }
+                    return@launch
                 }
-            } catch (e: Exception) {
-                _state.update { it.copy(submitting = false, formError = e.shortMessage()) }
+                if (step != null) {
+                    _state.update { it.copy(submitting = false, password = "", twoFactor = step) }
+                    return@launch
+                }
+            }
+            requestRegistrationCode()
+        }
+    }
+
+    /** Asks the database to email the 6-digit registration code to the company's contact address. */
+    private suspend fun requestRegistrationCode() {
+        val s = _state.value
+        _state.update { it.copy(submitting = true, formError = null) }
+        try {
+            val sent = registration.start(s.csdNumber, s.registrationNumber)
+            _state.update {
+                if (sent.already) it.copy(submitting = false, step = SignUpStep.DONE,
+                    doneMessage = "You are already registered for TenderTrack.")
+                else it.copy(submitting = false, step = SignUpStep.CODE, sentTo = sent.sentTo, code = "",
+                    codeError = null, needNewCode = false, notice = "A 6-digit code was sent to ${sent.sentTo}.")
+            }
+        } catch (e: Exception) {
+            _state.update { it.copy(submitting = false, formError = e.shortMessage()) }
+        }
+    }
+
+    // -- Two-factor sign-in (after the portal password) ------------------------------------
+
+    fun onTwoFactorCode(value: String) = _state.update {
+        it.copy(twoFactor = it.twoFactor?.copy(code = TwoFactorGate.normalise(value), error = null))
+    }
+
+    fun submitTwoFactor() {
+        val step = _state.value.twoFactor ?: return
+        if (step.submitting) return
+        _state.update { it.copy(twoFactor = step.copy(submitting = true, error = null)) }
+        viewModelScope.launch {
+            val wrong = gate.check(step)
+            when {
+                wrong == null -> {
+                    _state.update { it.copy(twoFactor = null) }
+                    requestRegistrationCode()
+                }
+                wrong.wrongCodes >= MAX_WRONG_CODES -> {
+                    signOutHere()
+                    _state.update {
+                        it.copy(twoFactor = null, formError = "Too many wrong codes. You have been signed out: try again.")
+                    }
+                }
+                else -> _state.update { it.copy(twoFactor = wrong.copy(submitting = false)) }
             }
         }
+    }
+
+    fun cancelTwoFactor() {
+        _state.update { it.copy(twoFactor = null) }
+        viewModelScope.launch { signOutHere() }
+    }
+
+    private suspend fun signOutHere() {
+        runCatching { auth.signOut() }
+        signedInHere = false
+        _state.update { it.copy(signedInAs = null) }
     }
 
     /** Signs in with the portal's email and password. Returns null (with a message shown) if it fails. */
@@ -220,6 +294,10 @@ class SupplierSignUpViewModel(
 
     /** Returns true if it went back a step, false if the screen should close. */
     fun back(): Boolean {
+        if (_state.value.twoFactor != null) {
+            cancelTwoFactor()
+            return true
+        }
         if (_state.value.step != SignUpStep.CODE || _state.value.submitting) return false
         _state.update { it.copy(step = SignUpStep.DETAILS, codeError = null, notice = null) }
         return true
@@ -264,15 +342,22 @@ fun SupplierSignUpScreen(
 ) {
     val state by viewModel.state.collectAsState()
 
-    // The phone's Back button goes from step 2 to step 1, not out of the form.
-    BackHandler(enabled = state.step == SignUpStep.CODE) { viewModel.back() }
+    // The phone's Back button goes from step 2 to step 1 (and out of the code step), not out of the form.
+    BackHandler(enabled = state.step == SignUpStep.CODE || state.twoFactor != null) { viewModel.back() }
 
     AppScaffold(
         title = "Supplier registration",
         onBack = { if (!viewModel.back()) viewModel.leave(onBack) }
     ) {
+        val twoFactor = state.twoFactor
         when {
             state.checking -> LoadingState(message = "One moment…")
+            twoFactor != null -> TwoFactorStep(
+                step = twoFactor,
+                onCode = viewModel::onTwoFactorCode,
+                onSubmit = viewModel::submitTwoFactor,
+                onCancel = viewModel::cancelTwoFactor
+            )
             state.step == SignUpStep.DETAILS -> DetailsStep(state, viewModel) { viewModel.leave(onSignIn) }
             state.step == SignUpStep.CODE -> CodeStep(state, viewModel)
             else -> DoneStep(state) { viewModel.finish(onSignedIn) }
@@ -291,7 +376,8 @@ private fun DetailsStep(state: SupplierSignUpUiState, viewModel: SupplierSignUpV
         title = "Two registrations, for security",
         text = "First register your company on the eTender portal. Then register here with the same email and " +
             "password and the numbers from that registration. A 6-digit code is emailed to the company's " +
-            "contact address to prove it is you. Both registrations are needed to claim an award.",
+            "contact address to prove it is you. Both registrations are needed to claim an award. Signing in " +
+            "also asks for a code from an authenticator app (two-factor sign-in).",
         tone = NoteTone.Info,
         icon = Icons.Default.Shield
     )
