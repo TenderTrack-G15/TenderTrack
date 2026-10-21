@@ -27,7 +27,7 @@ export function tenderConcerns(t, now = Date.now()) {
   }
 
   if (t.status === 'published' && t.closing_date && new Date(t.closing_date).getTime() < now) {
-    concerns.push({ severity: 'medium', text: 'Still open for bids after the closing date' });
+    concerns.push({ severity: 'medium', text: 'Still open for bids after the bid closing date' });
   }
 
   if (['awarded', 'in_progress', 'completed'].includes(t.status) && !t.awarded_supplier_name) {

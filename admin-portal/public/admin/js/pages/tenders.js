@@ -7,7 +7,7 @@
 
 import { sb, rpc, messageOf } from '../client.js';
 import {
-  h, clear, icon, tile, pageHead, searchBox, select, badge, note, empty, money, moneyCompact, date,
+  h, clear, icon, tile, pageHead, searchBox, select, badge, note, empty, money, moneyCompact, date, dateTime,
   STATUS_LABELS, modal, field, busy, toast,
 } from '../ui.js';
 import { tenderConcerns, SEVERITY_TONE } from '../rules.js';
@@ -16,6 +16,23 @@ const STATUS_TONE = {
   registered: 'neutral', published: 'info', under_evaluation: 'warn',
   awarded: 'success', in_progress: 'success', completed: 'neutral',
 };
+/**
+ * The bid closing date: the deadline for suppliers to submit bids. It is not
+ * the contract's end date or a phase's due date (those are in the app). The
+ * second line says where bidding stands, so the date makes sense at a glance.
+ */
+function bidClosing(t, now) {
+  if (!t.closing_date) return h('span', { class: 'secondary' }, '—');
+  const when = new Date(t.closing_date).getTime();
+  const days = Math.ceil((when - now) / 86400000);
+  let line;
+  if (t.status === 'registered') line = 'Planned · not advertised yet';
+  else if (t.status === 'published' && when > now) line = days <= 1 ? 'Bidding open · closes within a day' : `Bidding open · ${days} days left`;
+  else if (t.status === 'published') line = 'Date passed · bidding not closed yet';
+  else line = 'Bidding closed';
+  return [h('div', { class: 'nowrap' }, dateTime(t.closing_date)), h('div', { class: 'secondary' }, line)];
+}
+
 const FLAG_STATUS = { open: ['Open', 'danger'], under_investigation: ['Under investigation', 'warn'], resolved: ['Resolved', 'success'] };
 
 export async function render(view) {
@@ -64,6 +81,7 @@ export async function render(view) {
   function draw() {
     const rows = visible();
     countLine.textContent = `${rows.length} of ${state.tenders.length} tenders`;
+    const now = Date.now();
     clear(tableHost);
     if (!rows.length) {
       tableHost.appendChild(h('div', { class: 'table-wrap' }, empty('No tenders match', 'Change the search or filters.', 'gavel')));
@@ -73,7 +91,9 @@ export async function render(view) {
       h('table', {},
         h('thead', {}, h('tr', {},
           h('th', {}, 'Tender'), h('th', {}, 'Status'), h('th', { class: 'num' }, 'Estimate'),
-          h('th', {}, 'Award'), h('th', { class: 'num' }, 'Paid'), h('th', {}, 'Closing'), h('th', {}, 'Checks'), h('th', {}, ''))),
+          h('th', {}, 'Award'), h('th', { class: 'num' }, 'Paid'),
+          h('th', { title: 'The deadline for suppliers to submit their bids' }, 'Bid closing date'),
+          h('th', {}, 'Checks'), h('th', {}, ''))),
         h('tbody', {}, rows.map((t) => h('tr', {},
           h('td', { class: 'wide' }, h('div', { class: 'primary' }, t.title), h('div', { class: 'secondary' }, `${t.reference_number} · ${t.department}`)),
           h('td', {}, badge(STATUS_LABELS[t.status] || t.status, STATUS_TONE[t.status] || 'neutral')),
@@ -82,7 +102,7 @@ export async function render(view) {
             ? [h('div', { class: 'nowrap' }, money(t.awarded_value)), h('div', { class: 'secondary' }, t.awarded_supplier_name || '—')]
             : h('span', { class: 'secondary' }, '—')),
           h('td', { class: 'num' }, money(t.paid_to_date)),
-          h('td', { class: 'nowrap' }, date(t.closing_date)),
+          h('td', {}, bidClosing(t, now)),
           h('td', {}, t.concerns.length
             ? h('div', { class: 'stack' }, t.concerns.map((c) => h('div', {}, badge(c.text, SEVERITY_TONE[c.severity]))))
             : h('span', { class: 'secondary' }, 'Nothing stands out')),
@@ -159,7 +179,8 @@ export async function render(view) {
   const departments = [...new Set(state.tenders.map((t) => t.department))].sort();
 
   clear(view).append(
-    pageHead('Oversight', 'Tender oversight', 'Read only. Tenders are registered, awarded and paid by officers in the app.'),
+    pageHead('Oversight', 'Tender oversight', 'Read only. Tenders are registered, awarded and paid by officers in the app. '
+      + 'The bid closing date is the deadline for suppliers to submit their bids; contract phases and their dates are followed in the app.'),
     tilesHost,
     h('div', { class: 'toolbar' },
       searchBox('Search reference, title or supplier', (e) => { state.query = e.target.value; draw(); }),
