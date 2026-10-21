@@ -28,7 +28,7 @@ const REPORTS = [
     columns: [
       ['reference_number', 'Reference'], ['title', 'Title'], ['department', 'Department'], ['category', 'Category'],
       [(t) => STATUS_LABELS[t.status] || t.status, 'Status'], [(t) => money(t.estimated_budget), 'Estimated budget'],
-      [(t) => date(t.closing_date), 'Closing date'], ['awarded_supplier_name', 'Awarded supplier'],
+      [(t) => date(t.closing_date), 'Bid closing date'], ['awarded_supplier_name', 'Awarded supplier'],
       [(t) => money(t.awarded_value), 'Awarded value'], [(t) => money(t.paid_to_date), 'Paid to date'], ['open_flag_count', 'Open flags'],
     ],
   },
